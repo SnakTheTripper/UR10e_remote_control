@@ -17,15 +17,15 @@ class ZmqHandler:
         self.pub_socket = None
 
     def connect(self):                      # connects to MiddleWare
-        print("Connecting to ZMQ ports...")
+        print("Binding ZMQ ports...")
         try:
             self.sub_socket = self.context.socket(zmq.SUB)
-            self.sub_socket.bind(f"tcp://{config.ip_address_bridge}:{config.port_mw_b}")
+            self.sub_socket.bind(f"tcp://{config.ip_address_MW}:{config.port_mw_b}")
             self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"Move_Commands")
             self.pub_socket = self.context.socket(zmq.PUB)
             self.pub_socket.bind(f"tcp://{config.ip_address_bridge}:{config.port_b_mw}")
         except:
-            sys.exit("Can't connect to ZMQ Ports")
+            sys.exit("Can't bind ZMQ Ports")
         print("ZMQ Connected Successfully")
         return self.sub_socket, self.pub_socket
 

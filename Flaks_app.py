@@ -1,5 +1,6 @@
 import json
 import math
+import sys
 import threading
 import time
 import zmq
@@ -66,11 +67,13 @@ sub_socket = context.socket(zmq.SUB)
 
 page_initialization = False
 
-
 # Connect to UR10 BRIDGE
-pub_socket.bind(f"tcp://{config.ip_address_flask_local}:{config.port_f_mw}")
-sub_socket.bind(f"tcp://{config.ip_address_flask_local}:{config.port_mw_f}")
-sub_socket.setsockopt(zmq.SUBSCRIBE, b"Joint_States")
+try:
+    pub_socket.connect(f"tcp://{config.ip_address_flask_local}:{config.port_f_mw}")
+    sub_socket.connect(f"tcp://{config.ip_address_MW}:{config.port_mw_f}")
+    sub_socket.setsockopt(zmq.SUBSCRIBE, b"Joint_States")
+except Exception as e:
+    sys.exit(f"Error with ports {config.port_f_mw} & {config.port_mw_f}: {e}")
 
 def d2r(deg):
     return deg * math.pi / 180
