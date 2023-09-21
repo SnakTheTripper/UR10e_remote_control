@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<!--<html xmlns="http://www.w3.org/1999/html">-->
+<head>
+    <title>UR10 Joint Controller</title>
+    <style>
+        .table-container-center {
+            display: flex;
+            justify-content: center;
+        }
+        .joint-row {
+            display: grid;
+            grid-template-columns: 1fr 0.5fr 2fr 0.5fr; /* Adjust these fractions based on your needs */
+            grid-gap: 16px; /* Space between each cell */
+            text-align: center;
+            border: 1px solid #000;
+            padding: 8px;
+        }
+        .parameter_row {
+            display: grid;
+            grid-template-columns: 1fr 0.5fr 2fr 0.5fr; /* Adjust these fractions based on your needs */
+            grid-gap: 16px; /* Space between each cell */
+            text-align: center;
+            border: 1px solid #000;
+            padding: 8px;
+        }
+        .joint-slider-wrapper {
+            position: relative;
+        }
+        .current-slider, .target-slider {
+            position: absolute;
+            text-align: center;
+            width: 75%;
+            left: 11%;
+        }
+        .current-slider {
+            z-index: 1;
+            opacity: 0.75;
+        }
+        .target-slider {
+            z-index: 2;
+        }
+
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        var current_joint_positions = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];   // kept updated
+        var program_list = []                                           // kept updated
+
+        function r2d(radians) {
+            return radians * (180 / Math.PI);
+
+        }
+        function updateValue(slider, output) {
+            const degrees = parseFloat(slider.value);
+            document.getElementById(output).innerText = degrees.toFixed(2); // Display as degrees with 2 decimal places
+        }
+
+        function updateCurrentPosition(joint, position) {
+            const slider = document.getElementById(`current_joint_${joint}`);
+            slider.value = r2d(position);
+            current_joint_positions[joint] = r2d(position);
+            updateValue(slider, `current_joint_${joint}`);
+            document.getElementById(`current_joint_box_${joint}`).innerText = r2d(position).toFixed(2); // This line is new
+        }
+
+
+        socket = io.connect('http://10.0.0.225:5000');
+
+        socket.on('connect', function() {
+            console.log('Websocket connected!');
+        });
+
+        socket.on('update_current', function(data) {
+            const positions = data.positions;
+            console.log(positions);
+
+            for (let i = 0; i < 6; i++) {
+                updateCurrentPosition(i, positions[i]);
+            }
+        });
+
+        // syncs target and speed + accel sliders across web clients
+
+        socket.on('update_target_positions', function(data) {
+            let target_positions = data.target_joint_positions;
+            for (let i = 0; i < target_positions.length; i++) {
+                const jointSlider = document.getElementById(`joint_${i}`);
+                jointSlider.value = r2d(target_positions[i]);
+                updateValue(jointSlider, `output_joint_${i}`);
+            }
+
+            let target_speed = data.speedJ;
+            let target_accel = data.accelJ;
+
+            // console.log(target_speed)
+            // console.log(target_accel)
+
+            const speed_slider = document.getElementById('joint_speed');
+            const accel_slider = document.getElementById('joint_accel');
+            speed_slider.value = r2d(target_speed)
+            accel_slider.value = r2d(target_accel)
+            updateValue(speed_slider, 'output_joint_speed')
+            updateValue(accel_slider, 'output_joint_accel')
+        });
+
+        // Initializes target position sliders with current position values for aesthetics
+
+        socket.on('target_slider_init', function (data) {
+            let current_jp = data.current_joint_positions
+            program_list = data.program_list
+            for (let i = 0; i < current_jp.length; i++) {
+                const jointSlider = document.getElementById(`joint_${i}`);
+                jointSlider.value = r2d(current_jp[i]);
+                updateValue(jointSlider, `joint_${i}`);
+            }
+            updateTable(program_list)
+        });
+        function increaseSlider(id) {
+            console.log("IncreaseSlider called with id: ", id);
+
+            let slider = document.getElementById(id);
+            slider.value = parseFloat(slider.value) + 1;  // adjust step size here
+            updateValue(slider, 'output_joint_' + id.split('_')[1]);
+        }
+
+        function decreaseSlider(id) {
+            console.log("DecreaseSlider called with id: ", id);
+
+            let slider = document.getElementById(id);
+            slider.value = parseFloat(slider.value) - 1;  // adjust step size here
+            updateValue(slider, 'output_joint_' + id.split('_')[1]);
+        }
+        function updateTable(program_list) {
+            let tableBody = document.getElementById('waypointTable').getElementsByTagName('tbody')[0];
+            tableBody.innerHTML = "";  // Clear existing rows
+
+            console.log(program_list)
+            for (let i = 0; i < program_list.length; i++) {
+                let row = tableBody.insertRow();
+                let cell1 = row.insertCell(0);
+                let cell2 = row.insertCell(1);
+                let cell3 = row.insertCell(2);
+
+                console.log(program_list)
+                const jointPositionsInDegrees = program_list[i][1].map((pos) => r2d(pos).toFixed(0));
+                cell1.innerHTML = jointPositionsInDegrees.toString();
+
+                cell2.innerHTML = r2d(program_list[i][2]).toFixed(0);  // Speed
+                cell3.innerHTML = r2d(program_list[i][3]).toFixed(0);  // Acceleration
+            }
+        }
+
+        // button functions
+
+        function handleSend() {
+            const jp = [];
+            for (let i = 0; i < 6; i++) {
+                jp.push(parseFloat(document.getElementById(`joint_${i}`).value));
+            }
+            const js = parseFloat(document.getElementById('joint_speed').value);
+            const ja = parseFloat(document.getElementById('joint_accel').value);
+
+            socket.emit('button_press', {action: 'send',
+            target_joint_positions: jp,
+            joint_speed: js,
+            joint_accel: ja})
+        }
+        function randomizeJointValues() {
+            // Generate random values between -360 and 360 for each joint
+            for (let i = 0; i < 3; i++) {
+                const randomValue = (Math.random() * 720) - 360;
+                const jointInput = document.getElementById(`joint_${i}`);
+                const outputSpan = document.getElementById(`output_joint_${i}`);
+
+                if (jointInput && outputSpan) {
+                    jointInput.value = randomValue;
+                    updateValue(jointInput, `output_joint_${i}`);
+                }
+            }
+        }
+        function setHomePosition() {
+            // Set the home position values [0 -90 0 -90 0 0] for each joint
+            const homePosition = [0, -90, 0, -90, 0, 0];
+            {% for i in range(6) %}
+                document.getElementById("joint_{{ i }}").value = homePosition[{{ i }}];
+                updateValue(document.getElementById("joint_{{ i }}"), "output_joint_{{ i }}");
+            {% endfor %}
+        }
+        function handleStop() {
+            socket.emit('button_press', {action: 'stop'})
+        }
+        function addToList() {
+            socket.emit('button_press', {action: 'addToList'})
+        }
+        function deleteFromList() {
+            socket.emit('button_press', {action: 'deleteFromList'})
+        }
+        function clearList() {
+            socket.emit('button_press', {action: 'clearList'})
+        }
+        function runProgram() {
+            socket.emit('button_press', {action: 'runProgram'})
+        }
+
+        // socket.on section
+
+        socket.on('updateTable', function(data) {
+            program_list = data.program_list
+            updateTable(program_list)
+        });
+        socket.on('program_end', function(data) {
+            alert('Program END')
+        });
+        socket.on('no_program_to_run', function(data) {
+            alert('No program to run...')
+        });
+
+
+
+
+        // allows current position flow for a second for initialization
+
+        window.onload = function () {
+            socket.emit('set_moving', { is_moving: true });
+        }
+
+        // keep alive
+
+        function keepAlive() {
+            socket.emit('keep_alive', {data: 'Client is alive'});
+        }
+        socket.on('keep_alive', function(data) {
+            const msg = data.message
+            console.log(msg)
+        });
+        setInterval(keepAlive, 10000)
+    </script>
+</head>
+<body class="table-container-center">
+    <form action="/" method="post">
+        <table>
+            <caption>Joint Control</caption>
+            {% for i in range(6) %}
+                <tr class="joint-row">
+                <th scope="row"><label>Joint {{ i }} Position (deg):</label></th>
+                <td><span id="current_joint_box_{{ i }}">0.00</span></td>
+                <td class="joint-slider-wrapper">
+                    <div style="display: flex; justify-content: space-between;">
+                        <button type="button" onclick="decreaseSlider('joint_{{ i }}')">-</button>
+                        <input type="range" id="joint_{{ i }}" name="joint_{{ i }}" class="target-slider" min="-360" max="360" step="1" value="{{ request.form['joint_' ~ i] }}" oninput="updateValue(this, 'output_joint_{{ i }}')">
+                        <input type="range" id="current_joint_{{ i }}" name="current_joint_{{ i }}" class="current-slider" min="-360" max="360" step="1">
+                        <button type="button" onclick="increaseSlider('joint_{{ i }}')">+</button>
+                    </div>
+                </td>
+                <td><span id="output_joint_{{ i }}">0.00</span></td>
+                </tr>
+            {% endfor %}
+            <tr class="parameter_row">
+                <th scope="row" style="text-align: right"><label> Speed (deg/s):</label></th>
+                <td></td>
+                <td class="joint-slider-wrapper" >
+                    <div style="display: flex; justify-content: space-between">
+                        <button type="button" onclick="decreaseSlider('joint_speed')">-</button>
+                        <input type="range" class="target-slider" id="joint_speed" name="joint_speed" min="1" max="179" step="1" value="{{ request.form['joint_speed']|default('30') }}" oninput="updateValue(this, 'output_joint_speed')">
+                        <button type="button" onclick="increaseSlider('joint_speed')">+</button>
+                    </div>
+                </td>
+                <td><span id="output_joint_speed">0.00</span></td>
+            <tr class="parameter_row">
+                <th scope="row" style="text-align: right"><label> Acceleration (deg/s^2):</label></th>
+                <td></td>
+                <td class="joint-slider-wrapper">
+                    <div style="display: flex; justify-content: space-between">
+                        <button type="button" onclick="decreaseSlider('joint_accel')">-</button>
+                        <input type="range" class="target-slider" id="joint_accel" name="joint_accel" min="1" max="179" step="1" value="{{ request.form['joint_accel']|default('30') }}" oninput="updateValue(this, 'output_joint_accel')">
+                        <button type="button" onclick="increaseSlider('joint_accel')">+</button>
+                    </div>
+                <td><span id="output_joint_accel">0.00</span></td>
+            </tr>
+        </table><br>
+        <button type="button" onclick="handleSend()">SEND</button>
+        <button type="button" onclick="randomizeJointValues()">Randomize Joint Values</button>
+        <button type="button" onclick="setHomePosition()">Set Home Position</button>
+
+        <br><br>
+
+        <button type="button" onclick="handleStop()">STOP</button>
+
+        <br><br>        <!-- PROGRAM LIST -->
+
+        <button type="button" onclick="addToList()">Add</button>
+        <button type="button" onclick="deleteFromList()">Delete last entry</button>
+        <button type="button" onclick="clearList()">CLEAR</button>
+        <button type="button" onclick="runProgram()">Run Program</button>
+
+        <br>
+        <table id="waypointTable">
+            <thead>
+                <tr>
+                    <th>Joint Positions</th>
+                    <th>Speed</th>
+                    <th>Acceleration</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Program Rows will go here -->
+            </tbody>
+        </table>
+    </form>
+</body>
