@@ -9,6 +9,7 @@ import zmq.asyncio
 import config
 
 asyncio.set_event_loop_policy(WindowsSelectorEventLoopPolicy())
+rtde_period = 1 / config.rtde_frequency    # 0.002s for 500Hz
 
 class ZmqHandler:
     def __init__(self):
@@ -60,7 +61,7 @@ class AsyncHandler:
         self.rtde_handler = rtde_handler
 
     async def check_status(self):
-        check_interval = 0.5
+        check_interval = 1
         while True:
             status_bit = self.rtde_handler.rtde_r.getSafetyStatusBits()
             # print(rtde_r.getSafetyMode())     # can be used instead of .getSafetyStatusBits
@@ -83,7 +84,7 @@ class AsyncHandler:
             else:
                 print("Invalid move type!")
 
-        elif stop:
+        else:
             if move_type == 0:  # MoveL
                 self.rtde_handler.rtde_c.stopL(a, True)  # True for async (non-blocking)
             elif move_type == 1:  # MoveJ
@@ -117,7 +118,7 @@ class AsyncHandler:
                 print(f"{target_positions}, stop: {stop}, move type: {move_type}")
 
                 await self.moveX(move_type, target_positions, speed, accel, stop)
-                await asyncio.sleep(0.02)
+                await asyncio.sleep(rtde_period)
 
             except KeyboardInterrupt:
                 break
@@ -137,10 +138,10 @@ class AsyncHandler:
                        "is_moving": is_moving}
             serialized_message = json.dumps(message).encode()
             await self.zmq_handler.pub_socket.send_multipart([b"Joint_States", serialized_message])
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(rtde_period)
 
     async def run(self):
-        print("Starting ASYNC function...")
+        print("\033[32mStarted ASYNC function!\033[0m")
         await asyncio.gather(self.send(), self.receive(), self.check_status())
 
 

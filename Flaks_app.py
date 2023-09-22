@@ -129,7 +129,8 @@ def stopButton():
     temp_tcp = central_data.target_tcp_positions
 
     central_data.STOP = True
-    send_movement()                     # send STOP signal
+    socketio.emit('STOP_button')
+    send_movement()                             # send STOP signal
 
     time.sleep(1)
 
@@ -166,8 +167,9 @@ def clearList():
 
 def runProgram():
     if len(central_data.program_list) > 0:
+        i = 0
         try:
-            for i in range(len(central_data.program_list)):
+            while i < len(central_data.program_list):   # dynamically check if list length changes
                 central_data.target_joint_positions = central_data.program_list[i][1]
                 central_data.joint_speed = central_data.program_list[i][2]
                 central_data.joint_accel = central_data.program_list[i][3]
@@ -184,8 +186,11 @@ def runProgram():
                     print("STOP Button pressed")
                     break
 
-            print("Program END")
-            socketio.emit('program_end')
+                i += 1
+
+            if not central_data.STOP:
+                print("Program END")
+                socketio.emit('program_end')
         except:
             print("Error with running program. Check robot status!")
     else:
