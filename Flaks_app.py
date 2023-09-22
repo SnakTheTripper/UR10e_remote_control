@@ -30,8 +30,8 @@ class CentralRobotData:
         self.program_list = []
 
     def update_from_received_data(self, received_data):
-        self.is_moving = received_data["is_moving"]
         self.current_joint_positions = received_data["current_joint_positions"]
+        self.is_moving = received_data["is_moving"]
         self.current_joint_speeds = received_data["current_joint_speeds"]
 
     def prepare_data_to_send(self):
@@ -85,6 +85,7 @@ def send_movement():
     socketio.emit('update_target_positions', {'target_joint_positions': central_data.target_joint_positions, 'target_tcp_positions': central_data.target_tcp_positions, 'speedJ': central_data.joint_speed, 'accelJ': central_data.joint_accel, 'speedL': central_data.tcp_speed, 'accelL': central_data.tcp_accel})
 
 def forward_current_positions():    # to web client
+    global page_initialization
     while True:
         try:
             [topic, received_message] = sub_socket.recv_multipart()
@@ -92,11 +93,10 @@ def forward_current_positions():    # to web client
 
             central_data.update_from_received_data(decoded_message)
 
-            if central_data.is_moving or page_initialization:
-                if central_data.move_type == 0:     # moveL
-                    socketio.emit('update_current', {'positions': central_data.current_tcp_positions})
-                elif central_data.move_type == 1:   # moveJ
-                    socketio.emit('update_current', {'positions': central_data.current_joint_positions})
+            if central_data.move_type == 0:     # moveL
+                socketio.emit('update_current', {'positions': central_data.current_tcp_positions})
+            elif central_data.move_type == 1:   # moveJ
+                socketio.emit('update_current', {'positions': central_data.current_joint_positions})
 
         except Exception as e:
             print(f"Error in receiving the actual joint positions!: {e}")
@@ -131,8 +131,6 @@ def stopButton():
     central_data.STOP = True
     socketio.emit('STOP_button')
     send_movement()                             # send STOP signal
-
-    time.sleep(1)
 
     central_data.set_target_to_current()        # target = current (so robot does not resume movement)
     central_data.STOP = False                   # reset STOP bit to False (robot won't move)
@@ -236,13 +234,12 @@ def handle_buttons(command_data):
 
     socketio.emit('updateTable', {'program_list': central_data.program_list})
 
-@socketio.on('set_moving')
-def handle_moving_event(data):      # start current_position flow after page load for initialization
+@socketio.on('page_init')
+def handle_moving_event():      # start current_position flow after page load for initialization
     global page_initialization
 
     page_initialization = True
-    time.sleep(0.02)               # might need to tune this later based on testing with cloud
-    page_initialization = False
+    pub_socket.send_multipart([b"page_init", b'blank'])     # makes MWare send current positions to server (here)
 
     # Send signal to initialize target sliders
     socketio.emit('target_slider_init', {'current_joint_positions': central_data.current_joint_positions, 'program_list': central_data.program_list})
