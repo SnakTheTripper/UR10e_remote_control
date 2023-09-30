@@ -1,0 +1,4 @@
+Flask==2.3.3
+Flask_SocketIO==5.3.6
+opcua==0.98.13
+pyzmq==25.1.1

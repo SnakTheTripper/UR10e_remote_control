@@ -149,7 +149,7 @@ class AsyncHandler:
         while True:
             await self.local_robot_state.get_actual_from_robot()
             message = self.local_robot_state.gather_to_send()   # uses an instance of class UR10e in this class method
-            print(message)
+            # print(message)
 
             serialized_message = json.dumps(message).encode()
             await self.zmq_handler.pub_socket.send_multipart([b"Joint_States", serialized_message])

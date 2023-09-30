@@ -120,7 +120,7 @@ async def update_opcua():
     # print('sending package to opcua server')
     await to_opcua_socket.send_multipart([b"update_package", serialized_message])
 
-async def send_to_flask(pub_socket, topic, message, last_moving_state): # FW current to Flask
+async def send_to_flask(pub_socket, topic, message, last_moving_state):     # FW current to Flask
     if local_robot_state.is_moving or page_init:
         await pub_socket.send_multipart([topic, message])
     elif last_moving_state and not local_robot_state.is_moving:
@@ -145,7 +145,6 @@ async def receive_from_bridge(pub_socket, sub_socket):
     while True:
         topic, message = await sub_socket.recv_multipart()
         decoded_message = json.loads(message.decode())
-        print(f'from bridge: {decoded_message}')
 
         last_moving_state = await send_to_flask(pub_socket, topic, message, last_moving_state)
 
@@ -153,7 +152,7 @@ async def receive_from_bridge(pub_socket, sub_socket):
         if last_moving_state:   # one last call to keep opcua up to date
             await update_opcua()
 
-        await asyncio.sleep(rtde_period)
+        await asyncio.sleep(rtde_period / 2)
 
 
 async def zmq_forward_flask_to_bridge(pub_socket, sub_socket):
@@ -167,10 +166,10 @@ async def zmq_forward_flask_to_bridge(pub_socket, sub_socket):
             print(message.decode())
         elif topic == b"page_init":     # set page_init to True -> current data flow opens from bridge to flask
             page_init = True
-            await asyncio.sleep(0.2)   # might need more time to work properly
+            await asyncio.sleep(5 * rtde_period)   # might need more time to work properly
             page_init = False
 
-        await asyncio.sleep(0.002)
+        await asyncio.sleep(rtde_period / 2)
 
 
 async def main():

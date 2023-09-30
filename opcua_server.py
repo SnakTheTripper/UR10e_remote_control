@@ -1,5 +1,4 @@
 import asyncio
-import time
 
 # from asyncua import ua, Server
 from opcua import ua, Server
@@ -11,6 +10,7 @@ import json
 # locals
 import config
 import ur10e_object
+from datetime import datetime
 
 class UR10e:
     def __init__(self):
@@ -50,6 +50,20 @@ class UR10e:
     async def update_from_message(self, message):
         for key, value in message.items():
             setattr(self, key, value)
+
+prev_time=datetime.now()
+
+async def freq_calc(message):
+    global prev_time
+    current_time = datetime.now()
+    delta_time = (current_time - prev_time).total_seconds()
+
+    if delta_time > 0:  # Avoid division by zero
+        frequency = 1 / delta_time
+        print(f"Frequency: {frequency:.2f} Hz - Updated! {message}")
+
+    prev_time = current_time
+
 
 def initialize_OPCUA_server():
     try:
@@ -125,7 +139,7 @@ async def listen_to_mw(local_robot_state):
     while True:
         [topic, message_raw] = from_mw_socket.recv_multipart()
         message = json.loads(message_raw.decode())
-        print(message)
+        await freq_calc(message)
         await local_robot_state.update_from_message(message)    # message needs to be a dictionary
         await update_OPCUA_values(local_robot_state, opcua_dataset)
 
