@@ -148,7 +148,7 @@ async def receive_from_bridge(pub_socket, sub_socket):
 
         last_moving_state = await send_to_flask(pub_socket, topic, message, last_moving_state)
 
-        i = await update_data(decoded_message, i, opcua_freq_divider)     # updates local AND opcua (opcua with lower freq.)
+        i = await update_data(decoded_message, i, opcua_freq_divider)     # updates local AND opcua (with lower freq.)
         if last_moving_state:   # one last call to keep opcua up to date
             await update_opcua()
 
