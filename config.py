@@ -7,7 +7,7 @@ ip_address_MW = "10.0.0.225"
 ip_address_flask_server = "10.0.0.225"
 ip_address_opcua_server = "10.0.0.225"
 
-port_sI_ur = 30002      # port for Secondary Interface between bridge and UR10e
+port_sI_ur = 30002      # port for Secondary Interface between bridge and UR10e (use RTDE APIs instead)
 port_flask = 5000       # port of Flask Server
 port_opcua = 5001       # port of OPCUA Server
 
