@@ -2,7 +2,6 @@ import asyncio
 import config
 from datetime import datetime
 from asyncua import Client
-import statistics
 
 opcua_period = 1000 / config.opcua_frequency
 

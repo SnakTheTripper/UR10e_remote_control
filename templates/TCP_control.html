@@ -1,20 +1,18 @@
 <!DOCTYPE html>
+<!--<html xmlns="http://www.w3.org/1999/html">-->
 <head>
     <title>UR10 TCP Controller</title>
     <style>
-        .table-container-center {
+        .top-button-row {
+            display: flex;
+            justify-content: space-between;
+        }
+        .center-container {
             display: flex;
             justify-content: center;
         }
         .tcp-row {
-            display: grid;
-            grid-template-columns: 1fr 0.5fr 1fr 0.5fr; /* Adjust these fractions based on your needs */
-            grid-gap: 16px; /* Space between each cell */
-            text-align: center;
-            border: 1px solid #000;
-            padding: 8px;
-        }
-        .parameter_row {
+            width: 700px;
             display: grid;
             grid-template-columns: 1fr 0.5fr 2fr 0.5fr; /* Adjust these fractions based on your needs */
             grid-gap: 16px; /* Space between each cell */
@@ -22,7 +20,16 @@
             border: 1px solid #000;
             padding: 8px;
         }
-        .joint-slider-wrapper {
+        .parameter_row {
+            width: 700px;
+            display: grid;
+            grid-template-columns: 1fr 0.5fr 2fr 0.5fr; /* Adjust these fractions based on your needs */
+            grid-gap: 16px; /* Space between each cell */
+            text-align: center;
+            border: 1px solid #000;
+            padding: 8px;
+        }
+        .tcp-slider-wrapper {
             position: relative;
         }
         .current-slider, .target-slider {
@@ -38,116 +45,181 @@
         .target-slider {
             z-index: 2;
         }
+        .waypoint-table-header {
+            width: 700px;
+            display: grid;
+            grid-template-columns: 1fr 2fr 1fr 1fr; /* Adjust these fractions based on your needs */
+            grid-gap: 16px; /* Space between each cell */
+            text-align: center;
+            border: 1px solid #000;
+            padding: 8px;
+        }
+        .waypoint-table-row {
+            width: 700px;
+            display: grid;
+            grid-template-columns: 1fr 2fr 1fr 1fr; /* Adjust these fractions based on your needs */
+            grid-gap: 16px; /* Space between each cell */
+            text-align: center;
+            border: 1px solid #000;
+            padding: 4px;
+        }
 
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script>
-        var current_tcp_positions = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];   // not used currently but updated
-        var tcp_position = []
-        var program_list = []
+        var program_list = []                      // kept updated
+        const configData = {{ config_data | tojson | safe }};
+        console.log('configData from config.py:')
+        console.log(configData)
+
+        const jointLimitsLower = configData.joint_limits_lower;
+        const jointLimitsUpper = configData.joint_limits_upper;
+        const tcpLimitsLower = configData.tcp_limits_lower;
+        const tcpLimitsUpper = configData.tcp_limits_upper;
+        const homePositionTCP = configData.home_position_tcp
+        // console.log(homePosition)
+
+        socket = io.connect('http://' + configData.ip_address_flask + ':' + configData.port_flask)
 
         function r2d(radians) {
             return radians * (180 / Math.PI);
 
         }
-        function updateValue(inputElement, outputElementId) {   // value from, value to
-            const value = inputElement.value;
-            console.log('trying to update element with ID: ', outputElementId)
-            document.getElementById(outputElementId).innerText = parseFloat(value).toFixed(2);
-            console.log('updated.')
-        }
-
-        function randomizeTcpValues() {
-            const positionFields = ['tcp_0', 'tcp_1', 'tcp_2'];     // x  y  z
-            const angleFields = ['tcp_3', 'tcp_4', 'tcp_5'];        // rx ry rz
-
-            for (const field of positionFields) {
-                const randomValue = (Math.floor(Math.random() * (1000 - 100 + 1)) + 100) / 1000;  // Random between 100 and 1000
-                document.getElementById(field).value = randomValue;
-                updateValue(document.getElementById(field), `output_${field}`);
-            }
-
-            for (const field of angleFields) {
-                const randomAngle = Math.floor(Math.random() * (359 - (-359) + 1)) - 359;  // Random between -359 and 359
-                const randomRadian = randomAngle;
-                document.getElementById(field).value = randomRadian;
-                updateValue(document.getElementById(field), `output_${field}`);
-            }
-        }
-        function setHomePosition() {
-            // Set the home position values [0 -90 0 -90 0 0] for each joint
-            const homePosition = [0, 0, 500, 0, 0, 0];        // i hope it's in mm
-            {% for i in range(6) %}
-                document.getElementById("tcp_{{ i }}").value = homePosition[i]
-                updateValue(document.getElementById("tcp_{{ i }}"), homePosition[i])
-            {% endfor %}
-        }
-        function updateCurrentPosition(box, position) {
-            const slider = document.getElementById(`current_tcp_${box}`);
-            slider.value = r2d(position);
-            current_tcp_positions[box] = r2d(position);
-            updateValue(slider, `current_tcp_${box}`);
-            document.getElementById(`current_tcp_box_${box}`).innerText = r2d(position).toFixed(2); // This line is new
-        }
-
-        function collectTCPValues() {
-            const tcp_positions = [];
-            for (let i = 0; i < 6; i++) {
-                tcp_positions.push(parseFloat(document.getElementById(`tcp_${i}`).value));
-            }
-            return tcp_positions;
-        }
-
-        socket = io.connect('http://10.0.0.225:5000');
-
-        socket.on('connect', function() {
-            console.log('Websocket connected!');
-        });
-
-        window.onload = function () {
-            initialize_sliders()
-        }
-
-
-
         function updateTable(program_list) {
             let tableBody = document.getElementById('waypointTable').getElementsByTagName('tbody')[0];
             tableBody.innerHTML = "";  // Clear existing rows
 
             for (let i = 0; i < program_list.length; i++) {
                 let row = tableBody.insertRow();
+                row.classList.add('waypoint-table-row');
+
                 let cell1 = row.insertCell(0);
                 let cell2 = row.insertCell(1);
                 let cell3 = row.insertCell(2);
+                let cell4 = row.insertCell(3);
 
-                const jointPositionsInDegrees = program_list[i][1].map((pos) => r2d(pos).toFixed(0));
-                cell1.innerHTML = jointPositionsInDegrees.toString();
-
-                cell2.innerHTML = r2d(program_list[i][2]).toFixed(0);  // Speed
-                cell3.innerHTML = r2d(program_list[i][3]).toFixed(0);  // Acceleration
+                // console.log(program_list)
+                const move_type = program_list[i][0]
+                                let tcpPositionsInMillimeters
+                let jointPositionsInDegrees
+                if (move_type === 0) {
+                    tcpPositionsInMillimeters = program_list[i][1].map((pos) => (1000*pos).toFixed(0));
+                    cell1.innerHTML = "L";
+                    cell2.innerHTML = tcpPositionsInMillimeters
+                    cell3.innerHTML = (program_list[i][2]).toFixed(1);  // Speed
+                    cell4.innerHTML = (program_list[i][3]).toFixed(1);  // Acceleration
+                }else if (move_type === 1) {
+                    jointPositionsInDegrees = program_list[i][1].map((pos) => r2d(pos).toFixed(0));
+                    cell1.innerHTML = "J"
+                    cell2.innerHTML = jointPositionsInDegrees.toString();
+                    cell3.innerHTML = r2d(program_list[i][2]).toFixed(1);  // Speed
+                    cell4.innerHTML = r2d(program_list[i][3]).toFixed(1);  // Acceleration
+                }
             }
         }
+        function updateValue(slider, output) {
+            const degrees = parseFloat(slider.value);
+            document.getElementById(output).innerText = degrees.toFixed(2); // Display as degrees with 2 decimal places
 
-
-
-        function handleSend() {
-            const tcp_positions = [];
-            for (let i = 0; i < 6; i++) {
-                tcp_positions.push(parseFloat(document.getElementById(`tcp_output_${i}`).value));
+        }
+        function updateCurrentPosition(joint, position) {
+            const slider = document.getElementById(`current_tcp_${joint}`);
+            if (joint < 3) {
+                position_mm = position * 1000
+                slider.value = position_mm;
+                document.getElementById(`current_tcp_box_${joint}`).innerText = position_mm.toFixed(2);
+            } else {
+                slider.value = r2d(position)
+                document.getElementById(`current_tcp_box_${joint}`).innerText = r2d(position).toFixed(2);
             }
-            const v = parseFloat(document.getElementById('tcp_speed').value);
-            const a = parseFloat(document.getElementById('tcp_accel').value);
+            updateValue(slider, `current_tcp_${joint}`);
+        }
+        function setSliderLimits() {
+            for (let i = 0; i < 6; i++) {
+                const target_slider = document.getElementById(`tcp_${i}`);
+                const current_slider = document.getElementById(`current_tcp_${i}`);
+                if (target_slider) {
+                    target_slider.min = tcpLimitsLower[i];
+                    target_slider.max = tcpLimitsUpper[i];
 
-            socket.emit('button_press', {action: 'send',
-            target_tcp_positions: tcp_positions,
-            tcp_speed: v,
-            tcp_accel: a})
+                    current_slider.min = tcpLimitsLower[i];
+                    current_slider.max = tcpLimitsUpper[i];
+                }
+            }
         }
 
         // button functions
 
+        function goToTCP() {
+            window.location.href = '/joint_control';
+        }
+        function goToHome() {
+            window.location.href = '/';
+        }
+        function increaseSlider(id) {
+            console.log("IncreaseSlider called with id: ", id);
+
+            let slider = document.getElementById(id);
+            slider.value = parseFloat(slider.value) + 1;  // adjust step size here
+            updateValue(slider, 'output_tcp_' + id.split('_')[1]);
+        }
+        function decreaseSlider(id) {
+            console.log("DecreaseSlider called with id: ", id);
+
+            let slider = document.getElementById(id);
+            slider.value = parseFloat(slider.value) - 1;  // adjust step size here
+            updateValue(slider, 'output_tcp_' + id.split('_')[1]);
+        }
+        function handleSend() {
+            const tcp_p = [];
+            for (let i = 0; i < 6; i++) {
+                tcp_p.push(parseFloat(document.getElementById(`tcp_${i}`).value));
+            }
+            const tcp_s = parseFloat(document.getElementById('tcp_speed').value);
+            const tcp_a = parseFloat(document.getElementById('tcp_accel').value);
+
+            socket.emit('button_press', {action: 'send',
+            move_type: 0,           // for tcp control
+            target_tcp_positions: tcp_p,
+            linear_speed: tcp_s,
+            linear_accel: tcp_a})
+
+            console.log('target_tcp SENT: ' + tcp_p)
+        }
+        function randomizeTCPValues() {
+            // Generate random values between limits for each tcp value (xyz and rxryrz)
+            for (let i = 0; i < 6; i++) {
+                const lowerLimit = tcpLimitsLower[i];
+                const upperLimit = tcpLimitsUpper[i];
+                const randomValue = lowerLimit + (Math.random() * (upperLimit - lowerLimit));
+
+                const tcpInput = document.getElementById(`tcp_${i}`);
+                const outputSpan = document.getElementById(`output_tcp_${i}`);
+
+                if (tcpInput && outputSpan) {
+                    tcpInput.value = randomValue;
+                    updateValue(tcpInput, `output_tcp_${i}`);
+                }
+            }
+        }
+        function setHomePosition() {
+            for (let i = 0; i < 6; i++) {
+                document.getElementById(`tcp_${i}`).value = homePositionTCP[i];
+                updateValue(document.getElementById(`tcp_${i}`), `output_tcp_${i}`);
+            }
+        }
+        function handleStop() {
+            socket.emit('button_press', {action: 'stop'})
+        }
         function addToList() {
-            socket.emit('button_press', {action: 'addToList'})
+            const tcp_p = [];
+            for (let i = 0; i < 6; i++) {
+                tcp_p.push(parseFloat(document.getElementById(`tcp_${i}`).value));
+            }
+            const tcp_v = parseFloat(document.getElementById('tcp_speed').value);
+            const tcp_a = parseFloat(document.getElementById('tcp_accel').value);
+
+            socket.emit('button_press', {action: 'addToList', move_type: 0, target_pos: tcp_p, speed: tcp_v, accel: tcp_a})
         }
         function deleteFromList() {
             socket.emit('button_press', {action: 'deleteFromList'})
@@ -158,176 +230,201 @@
         function runProgram() {
             socket.emit('button_press', {action: 'runProgram'})
         }
+        function randomProgram() {
+            for (let i = 0 ; i < 10 ; i++) {
+                randomizeTCPValues()
+                addToList()
+            }
+        }
 
-        // socket.on section ()
+        // socket.on section
+
+        // syncs target and speed + accel sliders across web clients
+        // called whenever SEND button used
+        socket.on('update_target_positions', function(data) {
+            let target_positions = data.target_tcp_positions;
+            for (let i = 0; i < 3; i++) {
+                const jointSlider = document.getElementById(`tcp_${i}`);
+                jointSlider.value = target_positions[i] * 1000;
+                updateValue(jointSlider, `output_tcp_${i}`);
+            }
+            for (let i = 3; i < 6; i++) {
+                const jointSlider = document.getElementById(`tcp_${i}`);
+                jointSlider.value = r2d(target_positions[i]);
+                updateValue(jointSlider, `output_tcp_${i}`);
+            }
+
+            let target_speed = data.speedL;
+            let target_accel = data.accelL;
+
+            // console.log(target_speed)
+            // console.log(target_accel)
+
+            const speed_slider = document.getElementById('tcp_speed');
+            const accel_slider = document.getElementById('tcp_accel');
+            speed_slider.value = target_speed
+            accel_slider.value = target_accel
+            updateValue(speed_slider, 'output_tcp_speed')
+            updateValue(accel_slider, 'output_tcp_accel')
+        });
+
+        // Initializes target_position sliders with current_position values for aesthetics (target = current)
+        socket.on('target_slider_init', function (data) {
+            let current_tcp_pos = data.current_tcp_positions
+            program_list = data.program_list
+            for (let i = 0; i < 3; i++) {       // x y z - m2mm
+                const tcpSlider = document.getElementById(`tcp_${i}`);
+                tcpSlider.value = current_tcp_pos[i] * 1000;
+                updateValue(tcpSlider, `tcp_${i}`);
+                updateValue(tcpSlider, `output_tcp_${i}`);
+            }
+            for(let i = 3; i < 6; i++) {        // rx ry rz - r2d
+                const tcpSlider = document.getElementById(`tcp_${i}`);
+                tcpSlider.value = r2d(current_tcp_pos[i]);
+                updateValue(tcpSlider, `tcp_${i}`);
+                updateValue(tcpSlider, `output_tcp_${i}`);
+            }
+            // update speed and accel sliders too
+            const speedSlider = document.getElementById('tcp_speed')
+            const accelSlider = document.getElementById('tcp_accel')
+            updateValue(speedSlider, 'output_tcp_speed')
+            updateValue(accelSlider, 'output_tcp_accel')
+            updateTable(program_list)
+        });
 
         socket.on('updateTable', function(data) {
             program_list = data.program_list
             updateTable(program_list)
         });
         socket.on('program_end', function(data) {
-            alert('Program Ran Successfully')
+            alert('Program ran to the end')
         });
         socket.on('no_program_to_run', function(data) {
             alert('No program to run...')
         });
-
+        // socket.on('STOP_button', function(data) {
+        //     alert('Program Stopped!')
+        // });
+        socket.on('connect', function() {
+            console.log('Websocket connected!');
+        });
+        socket.on('disconnect', function() {
+            console.log('Websocket disconnected, retrying...');
+            socket = io.connect('http://10.0.0.225:5000');
+        });
         socket.on('update_current', function(data) {
-            const positions = data.positions;
-
+            const positions = data.tcp_positions;
+            console.log(positions);
             for (let i = 0; i < 6; i++) {
                 updateCurrentPosition(i, positions[i]);
-                //console.log("Updating", `current_tcp_${i}`, "with", positions[i]);
             }
         });
-
-        socket.on('update_target_positions', function(data) {
-            let target_positions = data.target_tcp_positions;
-
-            for (let i = 0; i < 6; i++) {
-                const tcpSlider = document.getElementById(`tcp_${i}`);
-                tcpSlider.value = target_positions[i];
-                updateValue(tcpSlider, `output_tcp_${i}`);
-            }
-
-            let target_speed = data.speedL;
-            let target_accel = data.accelL;
-
-            console.log(target_speed)
-            console.log(target_accel)
-
-            const tcp_speed = document.getElementById('tcp_speed');
-            const tcp_accel = document.getElementById('tcp_accel');
-            tcp_speed.value = target_speed;  // Fixed this to match your HTML IDs
-            tcp_accel.value = target_accel;  // Fixed this to match your HTML IDs
-            updateValue(tcp_speed, 'output_tcp_speed');  // Assuming you'll add these output elements
-            updateValue(tcp_accel, 'output_tcp_accel');  // Assuming you'll add these output elements
-        });
-
-
-        socket.on('target_slider_init', function (data) {      // Initializes target position sliders with current position values for aesthetics
-            let current_jp = data.current_tcp_positions
-            program_list = data.program_list
-            for (let i = 0; i < current_jp.length; i++) {
-                const jointSlider = document.getElementById(`tcp_${i}`);
-                jointSlider.value = r2d(current_jp[i]);
-                updateValue(jointSlider, `tcp_${i}`);
-            }
-            updateTable(program_list)
-        });
-
-
 
 
         // allows current position flow for a second for initialization
 
         window.onload = function () {
-            socket.emit('set_moving', { is_moving: true });
-        }
-        function keepAlive() {
-            socket.emit('keep_alive', {data: 'Client is alive'});
+            setSliderLimits()
+            socket.emit('page_init');
+            socket.emit('page_init');
+            socket.emit('page_init');   // needs to be called thrice to work properly on local. maybe more for Cloud
         }
 
         // keep alive
 
+        function keepAlive() {
+            socket.emit('keep_alive', {data: 'Client is alive'});
+        }
         socket.on('keep_alive', function(data) {
             const msg = data.message
             console.log(msg)
         });
-        setInterval(keepAlive, 10000)
+        setInterval(keepAlive, 5000)
     </script>
 </head>
-<body class="table-container-center">
+<body class="center-container">
     <form action="/" method="post">
+        <div class="top-button-row">
+            <button type="button" onclick="goToTCP()">Switch to JOINT Control</button>
+            <button type="button" style="text-align: right" onclick="goToHome()">Home Page</button>
+        </div>
+        <br>
         <table>
             <caption>TCP Control</caption>
-            <tr class="tcp-row">
-                <th scope="row"><label>X:</label></th>
-                <td><span id="current_tcp_0">0.00</span></td>
-                <td>
-                    <input type="number" id="tcp_0" name="tcp_x" min="-360" max="360" step="1" value="{{ request.form['tcp_x'] | default(200) }}" oninput="updateValue(this, 'output_tcp_0')">
-                </td>
-                <td><span id="output_tcp_0">0.00</span></td>
-            </tr>
-            <tr class="tcp-row">
-                <th scope="row"><label>Y:</label></th>
-                <td><span id="current_tcp_1">0.00</span></td>
-                <td>
-                    <input type="number" id="tcp_1" name="tcp_y" min="-360" max="360" step="1" value="{{ request.form['tcp_y'] | default(200) }}" oninput="updateValue(this, 'output_tcp_1')">
-                </td>
-                <td><span id="output_tcp_1">0.00</span></td>
-            </tr>
-            <tr class="tcp-row">
-                <th scope="row"><label>Z:</label></th>
-                <td><span id="current_tcp_2">0.00</span></td>
-                <td>
-                    <input type="number" id="tcp_2" name="tcp_z" min="-360" max="360" step="1" value="{{ request.form['tcp_z'] | default(200) }}" oninput="updateValue(this, 'output_tcp_2')">
-                </td>
-                <td><span id="output_tcp_2">0.00</span></td>
-            </tr>
-            <tr class="tcp-row">
-                <th scope="row"><label>Rx:</label></th>
-                <td><span id="current_tcp_3">0.00</span></td>
-                <td>
-                    <input type="number" id="tcp_3" name="tcp_rx" min="-360" max="360" step="1" value="{{ request.form['tcp_rx'] | default(200) }}" oninput="updateValue(this, 'output_tcp_3')">
-                </td>
-                <td><span id="output_tcp_3">0.00</span></td>
-            </tr>
-            <tr class="tcp-row">
-                <th scope="row"><label>Ry:</label></th>
-                <td><span id="current_tcp_4">0.00</span></td>
-                <td>
-                    <input type="number" id="tcp_4" name="tcp_ry" min="-360" max="360" step="1" value="{{ request.form['tcp_ry'] | default(200) }}" oninput="updateValue(this, 'output_tcp_4')">
-                </td>
-                <td><span id="output_tcp_4">0.00</span></td>
-            </tr>
-            <tr class="tcp-row">
-                <th scope="row"><label>Rz:</label></th>
-                <td><span id="current_tcp_r5">0.00</span></td>
-                <td>
-                    <input type="number" id="tcp_5" name="tcp_rz" min="-360" max="360" step="1" value="{{ request.form['tcp_rz'] | default(200) }}" oninput="updateValue(this, 'output_tcp_5')">
-                </td>
-                <td><span id="output_tcp_5">0.00</span></td>
-            </tr>
-
-            <tr class="tcp-row">
-                <th scope="row" style="text-align: center"><label>TCP speed: </label></th>
+            {% set row_names = ['TCP X:', 'TCP Y:', 'TCP Z:', 'TCP Rx:', 'TCP Ry:', 'TCP Rz:'] %}
+            {% for i in range(6) %}
+                <tr class="tcp-row" , style="text-align: center">
+                    <th scope="row"><label>{{ row_names[i] }}</label></th>
+                    <td><span id="current_tcp_box_{{ i }}">0.00</span></td>
+                    <td class="tcp-slider-wrapper">
+                        <div style="display: flex; justify-content: space-between;">
+                            <button type="button" onclick="decreaseSlider('tcp_{{ i }}')">-</button>
+                            <input type="range" id="tcp_{{ i }}" name="tcp_{{ i }}" class="target-slider" min="-360" max="360" step="1" value="{{ request.form['tcp_' ~ i] }}" oninput="updateValue(this, 'output_tcp_{{ i }}')">
+                            <input type="range" id="current_tcp_{{ i }}" name="current_tcp_{{ i }}" class="current-slider" min="-360" max="360" step="1">
+                            <button type="button" onclick="increaseSlider('tcp_{{ i }}')">+</button>
+                        </div>
+                    </td>
+                    <td style="text-align: center"><span id="output_tcp_{{ i }}">0.00</span></td>
+                </tr>
+            {% endfor %}
+            <tr class="parameter_row">
+                <th scope="row" style="text-align: center"><label> Speed (m/s):</label></th>
                 <td></td>
-                <td>
-                    <input type="number" id="tcp_speed" name="tcp_speed" min="1" max="5" step="0.1" value="{{ request.form['tcp_' ~ i] | default(0.5) }}">
+                <td class="tcp-slider-wrapper" >
+                    <div style="display: flex; justify-content: space-between">
+                        <button type="button" onclick="decreaseSlider('tcp_speed')">-</button>
+                        <input type="range" class="target-slider" id="tcp_speed" name="tcp_speed" min="0.1" max="3" step="0.1" value="{{ request.form['tcp_speed']|default('0.1') }}" oninput="updateValue(this, 'output_tcp_speed')">
+                        <button type="button" onclick="increaseSlider('tcp_speed')">+</button>
+                    </div>
                 </td>
+                <td><span id="output_tcp_speed">0.00</span></td>
             </tr>
-            <tr class="tcp-row">
-                <th scope="row" style="text-align: center"><label>TCP acceleration: </label></th>
+            <tr class="parameter_row">
+                <th scope="row" style="text-align: center"><label> Acceleration (m/s^2):</label></th>
                 <td></td>
-                <td>
-                    <input type="number" id="tcp_accel" name="tcp_accel" min="1" max="5" step="0.1" value="{{ request.form['tcp_' ~ i] | default(0.5) }}">
-                </td>
+                <td class="tcp-slider-wrapper">
+                    <div style="display: flex; justify-content: space-between">
+                        <button type="button" onclick="decreaseSlider('tcp_accel')">-</button>
+                        <input type="range" class="target-slider" id="tcp_accel" name="tcp_accel" min="0.1" max="3" step="0.1" value="{{ request.form['tcp_accel']|default('0.1') }}" oninput="updateValue(this, 'output_tcp_accel')">
+                        <button type="button" onclick="increaseSlider('tcp_accel')">+</button>
+                    </div>
+                <td><span id="output_tcp_accel">0.00</span></td>
             </tr>
         </table><br>
-        <button type="button" onclick="handleSend()">SEND</button>
-        <button type="button" onclick="randomizeTcpValues()">Randomize TCP Values</button>
-        <button type="button" onclick="setHomePosition()">Set Home Position</button>
+        <div class="center-container">
+            <button type="button" onclick="handleSend()">SEND</button>
+            <button type="button" onclick="randomizeTCPValues()">Randomize TCP Values</button>
+            <button type="button" onclick="setHomePosition()">Set Home Position</button>
+        </div>
+        <br>
+        <div class="center-container">
+            <button style="background-color: crimson; height: 50px; width: 100px" type="button" onclick="handleStop()">STOP</button>
+        </div>
+        <br><br><br>        <!-- PROGRAM LIST -->
 
-        <br><br><br><br>
+        <div class="center-container">
+            <button type="button" onclick="addToList()">Add</button>
+            <button type="button" onclick="deleteFromList()">Delete last entry</button>
+            <button type="button" onclick="clearList()">CLEAR</button>
+            <button type="button" onclick="runProgram()">Run Program</button>
+            <button type="button" onclick="randomProgram()">Generate Random Program</button>
+        </div>
 
-        <button type="button" onclick="addToList()">Add</button>
-        <button type="button" onclick="deleteFromList()">Delete last entry</button>
-        <button type="button" onclick="clearList()">CLEAR</button>
-        <button type="button" onclick="runProgram()">Run Program</button>
-        <table id="waypointTable">
-            <thead>
-                <tr>
-                    <th>Joint Positions</th>
-                    <th>Speed</th>
-                    <th>Acceleration</th>
-                </tr>
-            </thead>
-            <tbody>
-                <!-- Program Rows will go here -->
-            </tbody>
-        </table>
-
-
+        <br>
+        <div class="table-container-center">
+            <table id="waypointTable">
+                <thead>
+                    <tr class="waypoint-table-header">
+                        <th>Move Type</th>
+                        <th>Target Positions</th>
+                        <th>Speed</th>
+                        <th>Acceleration</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Program Rows will go here -->
+                </tbody>
+            </table>
+        </div>
     </form>
 </body>

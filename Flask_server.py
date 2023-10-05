@@ -11,6 +11,7 @@ import config
 
 rtde_period = 1 / config.rtde_frequency
 last_stop_time = None
+global_stop_flag = False
 
 class UR10e:
     def __init__(self):
@@ -154,7 +155,7 @@ def sendButton(data):
 
     send_movement()
 def stopButton():  # DOESN'T WORK AFTER CLASS INTEGRATION - NEEDS FIX
-    global last_stop_time
+    global last_stop_time, global_stop_flag
     now = datetime.now()
     if last_stop_time and now - last_stop_time < timedelta(seconds=3):
         print('Spamming stop button not permitted.')
@@ -175,6 +176,12 @@ def stopButton():  # DOESN'T WORK AFTER CLASS INTEGRATION - NEEDS FIX
                                                   'accelL': local_robot_state.linear_accel})
         else:
             print('Robot not moving, Stop not sent')
+
+    # raise and lower global stop flag for runProgram function to see (if program is running)
+
+    global_stop_flag = True
+    time.sleep(3)
+    global_stop_flag = False
 def addToList(data):
     m_t = data["move_type"]     # updated local move_type variable for each ADD button press
     local_robot_state.move_type = m_t
@@ -205,9 +212,9 @@ def clearList():
     local_robot_state.program_list = []
     print(f"Program List Cleared: {local_robot_state.program_list}")
 def runProgram():
+    global global_stop_flag
     if len(local_robot_state.program_list) > 0:
         i = 0
-        tmp_stop_flag = False
         print(local_robot_state.program_list)
         try:
             while i < len(local_robot_state.program_list) and not local_robot_state.STOP:  # dynamically check if list length changes
@@ -226,20 +233,18 @@ def runProgram():
                 send_movement()
 
                 print(f"Doing move nr. {i + 1}")
-                time.sleep(2)  # needed between waypoints
+                time.sleep(1)  # between waypoints
 
                 while local_robot_state.is_moving:
-                    if local_robot_state.STOP:
-                        tmp_stop_flag = True
-                        print("STOP Button pressed")
+                    if global_stop_flag:
                         break
-                    time.sleep(rtde_period / 10)
-                if tmp_stop_flag:
+                    time.sleep(rtde_period)
+                if global_stop_flag:
                     break
 
                 i += 1
 
-            if not tmp_stop_flag:
+            if not global_stop_flag:
                 print("Program ran to the end")
                 socketio.emit('program_end')
             else:
@@ -314,7 +319,7 @@ def handle_keep_alive(message):
 
 if __name__ == '__main__':
     receiver_thread = threading.Thread(target=update_current_positions)
-    print("ab to start receiver thread")
+    print("about to start receiver thread")
     receiver_thread.start()
     socketio.run(app, host=config.ip_address_flask_server, port=config.port_flask, debug=True,
                  allow_unsafe_werkzeug=True)
