@@ -6,6 +6,7 @@ import sys
 import time
 import rtde_control
 import rtde_receive
+import dashboard_client
 import zmq.asyncio
 import config
 
@@ -37,62 +38,64 @@ class ZmqHandler:
 
 class RtdeHandler:
     def __init__(self):
-        self.rtde_c = None
         self.rtde_r = None
+        self.rtde_c = None
+        self.ur_dashboard_client = dashboard_client.DashboardClient(config.ip_address_ur10, config.port_ur_dashboard)
 
     def connect_rtde_r(self):
         print("Connecting RTDE Receive Interface...")
         try:
-            self.rtde_r.disconnect()
-        except:
-            time.sleep(0.1)
-
-        try:
             self.rtde_r = rtde_receive.RTDEReceiveInterface(config.ip_address_ur10, frequency=config.rtde_frequency)
         except RuntimeError as e:
             print(f"Make sure the robot is powered on!\nError: {e}")
-            print("Retrying connection!")
             sys.exit('Start Robot!')
 
         print("Connected to UR10e Successfully - RTDE Receive\n")
         return self.rtde_r
 
     def connect_rtde_c(self):
-        print("Connecting RTDE Control Interface...")
-        try:
-            self.rtde_c.disconnect()
-        except:
-            time.sleep(0.1)
 
+        # Initial Connection
+
+        if self.rtde_c is None:
+            print("Connecting RTDE Control Interface...")
+            try:
+                self.rtde_c = rtde_control.RTDEControlInterface(config.ip_address_ur10, frequency=config.rtde_frequency)
+                print("Connected to UR10e Successfully - RTDE Control\n")
+            except RuntimeError as e:
+                print(f"Make sure the robot is powered on!\nError: {e}")
+                sys.exit('Start Robot!')
+
+        # Reinitialization after Protective stop!
+
+        else:
+            print('RTDE Control Reinitializing...')
+            try:
+                self.rtde_c.disconnect()
+                self.rtde_c.reconnect()
+                print('RTDE Control Reinitialized successfully!')
+            except Exception as e:
+                print(f'Could not reconnect RTDE Control: {e}')
+
+        return self.rtde_c
+
+    def connect_ur_dashboard(self):   # RTDEScriptClient API
+        print('Connecting UR Dashboard Client...')
         try:
-            self.rtde_c = rtde_control.RTDEControlInterface(config.ip_address_ur10, frequency=config.rtde_frequency)
-        except RuntimeError as e:
+            self.ur_dashboard_client.connect()
+
+        except Exception as e:
             print(f"Make sure the robot is powered on!\nError: {e}")
-            print("Retrying connection!")
             sys.exit('Start Robot!')
 
-        print("Connected to UR10e Successfully - RTDE Control\n")
-        return self.rtde_c
+        print("Connected to UR10e Successfully - Dashboard Client\n")
+        return self.ur_dashboard_client
 
     def connect(self):
         rtde_r = self.connect_rtde_r()
         rtde_c = self.connect_rtde_c()
-        return rtde_r, rtde_c
-
-
-class SecondaryInterfaceHandler:
-    def __init__(self):
-        self.secondary_interface_socket = None
-
-    def connect(self):
-        print('Connecting Secondary Interface to UR10e...')
-        try:
-            self.secondary_interface_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.secondary_interface_socket.connect((config.ip_address_ur10, config.port_sI_ur))
-            print('Connected to UR10e Successfully - Secondary Interface\n')
-        except Exception as e:
-            print(f'Error connecting Secondary Interface to robot: {e}')
-        return self.secondary_interface_socket
+        ur_dashboard_socket = self.connect_ur_dashboard()
+        return rtde_r, rtde_c, ur_dashboard_socket
 
 
 class UR10e:
@@ -137,27 +140,29 @@ class UR10e:
 
 
 class AsyncHandler:
-    def __init__(self, zmq_handler, rtde_handler, sIF):  # sIF = secondary Interface
+    def __init__(self, zmq_handler, rtde_handler):
         self.zmq_handler = zmq_handler
         self.rtde_handler = rtde_handler
-        self.sIF = sIF.secondary_interface_socket
         self.local_robot_state = UR10e(rtde_handler.rtde_r, rtde_handler.rtde_c)
 
     async def check_status(self):
-        check_interval = 1
+        check_interval = 1      # seconds
         while True:
             status_bit = self.rtde_handler.rtde_r.getSafetyMode()
-            if status_bit != 1:     # not Normal Mode
-                print("STOP DETECTED. Enabling Robot...")
+
+            if status_bit != 1:      # not Normal Mode
+                print("STOP DETECTED!")
             while status_bit != 1:
                 if status_bit == 3:  # Protective Stop
                     try:
-                        print('Protective Stop detected. Attempting to clear...')
-                        ups = b'unlockProtectiveStop()\n'
-                        self.sIF.sendall(ups)
-                        time.sleep(1)  # intentionally not awaited
-                        self.sIF.sendall(b'closeSafetyPopup()\n')
-                        time.sleep(1)
+                        print('Protective Stop detected. Attempting to clear in 5 seconds...')
+                        for i in range(5):
+                            print(5-i)
+                            await asyncio.sleep(1)
+                        self.rtde_handler.ur_dashboard_client.unlockProtectiveStop()
+                        print('Protective Stop cleared!')
+                        self.rtde_handler.connect_rtde_c()
+
                     except Exception as e:
                         print(f'Error clearing Protective Stop: {e}')
 
@@ -165,10 +170,7 @@ class AsyncHandler:
                     print(f'Unrecognized Stop Mode. Status bit: {status_bit}')
 
                 status_bit = self.rtde_handler.rtde_r.getSafetyMode()
-                if status_bit == 1:
-                    print('Protective Stop Cleared!')
-                    self.rtde_handler.rtde_c = self.rtde_handler.connect_rtde_c()
-                    print(f'status bit: {status_bit}')
+
                 await asyncio.sleep(check_interval)     # inner loop interval
 
             await asyncio.sleep(check_interval)         # outer loop interval
@@ -176,9 +178,10 @@ class AsyncHandler:
     async def moveX(self, move_type, target_joint, target_tcp, v_joint, a_joint, v_lin, a_lin, stop):
         if not stop:
             if move_type == 0:  # MoveL
-                self.rtde_handler.rtde_c.moveL(target_tcp, v_lin, a_lin, asynchronous=True)  # True for async (non-blocking)
-                print(f'Executing move: {self.local_robot_state.target_tcp}')
+                if self.rtde_handler.rtde_c.isPoseWithinSafetyLimits(target_tcp):
+                    self.rtde_handler.rtde_c.moveL(target_tcp, v_lin, a_lin, asynchronous=True)  # True for async (non-blocking)
             elif move_type == 1:  # MoveJ
+                print(self.rtde_handler.rtde_c.isJointsWithinSafetyLimits(target_joint))
                 self.rtde_handler.rtde_c.moveJ(target_joint, v_joint, a_joint, asynchronous=True)  # True for async (non-blocking)
             else:
                 print("Invalid move type!")
@@ -186,16 +189,14 @@ class AsyncHandler:
 
         else:
             if move_type == 0:      # MoveL
-                self.rtde_handler.rtde_c.stopL(a_lin, asynchronous=True)
+                self.rtde_handler.rtde_c.stopL(a_lin, asynchronous=False)       # async=True sometimes drops control script. Difficult to reconnect.
             elif move_type == 1:    # MoveJ
-                self.rtde_handler.rtde_c.stopJ(a_joint, asynchronous=True)
+                self.rtde_handler.rtde_c.stopJ(a_joint, asynchronous=False)     # async=False added benefit: easy to know when robot came to a stop.
+            else:
+                print("Invalid move type for Stop command!")
 
-            self.local_robot_state.STOP = False  # resets stop bit after robot is stopped
-            # wait until robot comes to a complete stop
-            await asyncio.sleep(2)
-            # reinitialize RTDE control script. Clears previous movement and
-            # resets any "singularity errors" that might occur
-            self.rtde_handler.rtde_c = self.rtde_handler.connect_rtde_c()
+            self.local_robot_state.STOP = False  # resets stop bit after robot is stopped (gets sent to MW)
+
 
     async def receive(self):
         while True:
@@ -241,8 +242,5 @@ if __name__ == "__main__":
     rtde_handler = RtdeHandler()
     rtde_handler.connect()
 
-    secondary_interface_ur10e = SecondaryInterfaceHandler()
-    secondary_interface_ur10e.connect()
-
-    async_handler = AsyncHandler(zmq_handler, rtde_handler, secondary_interface_ur10e)
+    async_handler = AsyncHandler(zmq_handler, rtde_handler)
     asyncio.run(async_handler.run())
