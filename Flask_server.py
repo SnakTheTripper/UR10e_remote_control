@@ -28,8 +28,9 @@ class UR10e:
         self.joint_accel = 10
         self.linear_speed = 0.1
         self.linear_accel = 0.1
-        self.is_moving = False
-        self.STOP = False
+        self.is_moving = 0
+        self.STOP = 0
+        self.reset_STOP_flag = 0
 
         self.input_bit_0 = 0
         self.input_bit_1 = 0
@@ -114,7 +115,6 @@ def gather_config_data_for_JavaScript():
 
 def send_movement():
     message = local_ur10e.gather_to_send_command_values()  # gathers and sends relevant data from central_data to MW
-    print(f'debug: {message}')
     serialized_message = json.dumps(message)
     pub_socket.send_multipart([b"Move_Commands", serialized_message.encode()])
     # send package to web client so it updates other clients too
@@ -145,10 +145,21 @@ def receive_from_mw():  # on web client
             local_ur10e.control_mode = json.loads(received_message.decode())
             print(f'local control_mode set by OPCUA to {local_ur10e.control_mode}')
 
-        socketio.emit('update_current',
-                      {'joint_positions': local_ur10e.current_joint, 'tcp_positions': local_ur10e.current_tcp})
-        print(f'debug:\n {local_ur10e.current_joint, local_ur10e.current_tcp}')
+        if local_ur10e.control_mode == 0:   # flask
+            socketio.emit('update_current',
+                          {'current_joint': local_ur10e.current_joint, 'current_tcp': local_ur10e.current_tcp})
 
+        elif local_ur10e.control_mode == 1: # opcua
+            socketio.emit('update_current',
+                          {'current_joint': local_ur10e.current_joint, 'current_tcp': local_ur10e.current_tcp})
+            socketio.emit('update_target_positions',
+                          {'target_joint_positions': local_ur10e.target_joint,
+                           'target_tcp_positions': local_ur10e.target_tcp,
+                           'speedJ': local_ur10e.joint_speed,
+                           'accelJ': local_ur10e.joint_accel,
+                           'speedL': local_ur10e.linear_speed,
+                           'accelL': local_ur10e.linear_accel})
+                            # add output bits here
 
 def sendButton(data):
     m_t = data["move_type"]  # comes with every SEND button press (1 from joint, 0 from TCP control webpage)
@@ -163,6 +174,10 @@ def sendButton(data):
         local_ur10e.target_joint = data["target_joint_positions"]
         local_ur10e.joint_speed = data["joint_speed"]
         local_ur10e.joint_accel = data["joint_accel"]
+        try:
+            local_ur10e.target_tcp = data["target_tcp_positions"]
+        except:
+            pass
 
     if local_ur10e.control_mode == 0:
         send_movement()
@@ -175,16 +190,24 @@ def sendButton(data):
 def stopButton():
     global last_stop_time, global_stop_flag
     now = datetime.now()
-    if last_stop_time and now - last_stop_time < timedelta(seconds=3):
+    if last_stop_time and now - last_stop_time < timedelta(seconds=2):
         print('Spamming stop button not permitted.')
     else:
-        if local_ur10e.is_moving:  # only send if moving
+        if local_ur10e.is_moving:           # only send if moving
             last_stop_time = now
-            local_ur10e.STOP = True  # will be reset by reply from robot
-            socketio.emit('STOP_button')  # for alert on webpage
-            send_movement()  # send STOP signal
+            local_ur10e.STOP = 1            # will be reset by reply from robot
+            socketio.emit('STOP_button')    # for alert on webpage
+            send_movement()                 # send STOP signal
 
-            # robot will reset STOP flag after coming to a complete stop
+            # robot will send reset_STOP_flag after coming to a complete stop
+
+            while local_ur10e.reset_STOP_flag == 0:
+                print('debug: Waiting for resset_STOP_flag to turn to 1')
+                time.sleep(rtde_per)        # wait until reset_STOP_flag comes from robot
+
+            print('debug: reset_STOP_flag turned to 1! DONE! Resetting STOP to 0')
+            local_ur10e.STOP = 0
+            send_movement()
 
         else:
             print('Robot not moving, Stop not sent')
@@ -192,7 +215,7 @@ def stopButton():
     # raise and lower global stop flag for runProgram function to see (if program is running)
 
     global_stop_flag = True
-    time.sleep(3)
+    time.sleep(2)
     global_stop_flag = False
 
 
@@ -223,10 +246,11 @@ def clearList():
 def runProgram():
     global global_stop_flag
     if len(local_ur10e.program_list) > 0:
+        print(f'debig:\n{local_ur10e.program_list}')
         i = 0
         try:
             # dynamically check if list length changes
-            while i < len(local_ur10e.program_list) and not local_ur10e.STOP:
+            while i < len(local_ur10e.program_list) and local_ur10e.STOP == 0:
                 local_ur10e.move_type = local_ur10e.program_list[i][0]  # move_type J / L
                 if local_ur10e.move_type == 0:  # linear
                     local_ur10e.target_tcp = local_ur10e.program_list[i][1]

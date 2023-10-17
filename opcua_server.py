@@ -88,8 +88,9 @@ class UR10e:
         self.joint_accel = 0.1
         self.linear_speed = 0.1
         self.linear_accel = 0.1
-        self.is_moving = False
-        self.STOP = False
+        self.is_moving = 0
+        self.STOP = 0
+        self.reset_STOP_flag = 0
 
         self.input_bit_0 = 0
         self.input_bit_1 = 0
@@ -126,7 +127,8 @@ class UR10e:
                 'joint_accel': self.joint_accel,
                 'linear_speed': self.linear_speed,
                 'linear_accel': self.linear_accel,
-                'STOP': self.STOP, }
+                'STOP': self.STOP
+                }
 
 class OpcuaValueHandler:
     def __init__(self, opcua_dataset, local_ur):
@@ -262,6 +264,7 @@ class OpcuaValueHandler:
         self.local_ur10e.linear_speed = self.browse_name_to_var["TCP Speed"].get_value()
         self.local_ur10e.linear_accel = self.browse_name_to_var["TCP Acceleration"].get_value()
         self.local_ur10e.is_moving = self.browse_name_to_var["is_moving"].get_value()
+        self.local_ur10e.STOP = self.browse_name_to_var["STOP"].get_value()
 
         # Update Digital Inputs
         # CHANGE THESE TO GET_VALUE
@@ -280,6 +283,9 @@ class OpcuaValueHandler:
     def reset_send_flag(self):
         self.browse_name_to_var["SEND FLAG"].set_value(self.local_ur10e.SEND_FLAG)
 
+    def reset_stop_flag(self):
+            self.browse_name_to_var["STOP"].set_value(self.local_ur10e.STOP)
+
 class MiddlewareHandler:
     def __init__(self, from_mw, to_mw, opcua_dataset, local_ur, opcua_value_handler):
         self.from_mw_sock = from_mw
@@ -289,6 +295,11 @@ class MiddlewareHandler:
         self.opcua_value_handler = opcua_value_handler
 
         self.init_done = False
+
+    async def send(self):
+        message = self.local_ur10e.gather_to_send_command_values()
+        serialized_message = json.dumps(message).encode()
+        await self.to_mw_sock.send_multipart([b"opcua_command", serialized_message])
 
     async def receive_from_mw(self):
         topic = None
@@ -328,18 +339,25 @@ class MiddlewareHandler:
             if self.local_ur10e.control_mode == 1:  # opcua
 
                 if self.local_ur10e.SEND_FLAG == 1:
-                    print('Send Flag set to 1 yeah buddyyyy')
                     # send target positions to mw with zmq
-                    message = self.local_ur10e.gather_to_send_command_values()
-                    print(message)
-                    serialized_message = json.dumps(message).encode()
-
-                    print('sending opcua_command to MW')
-                    self.to_mw_sock.send_multipart([b"opcua_command", serialized_message])
+                    print('debig: SEND "button" pressed, sending target to MW')
+                    await self.send()
 
                     self.local_ur10e.SEND_FLAG = 0      # reset send flag so it acts like a button
                     self.opcua_value_handler.reset_send_flag()
-                    print('SEND FLAG RESET TO 0')
+
+                elif self.local_ur10e.STOP == 1:
+                    print('debug: sending STOP = 1')
+                    await self.send()
+
+                    while self.local_ur10e.reset_STOP_flag == 0:
+                        print('debug: waiting for reset_STOP_flag from MW')
+                        await asyncio.sleep(opcua_per)  # get stuck here until reset_STOP_flag arrives from bridge
+
+                    self.local_ur10e.STOP = 0       # reset STOP when reset_STOP_flag arrives
+                    self.opcua_value_handler.reset_stop_flag()
+                    print('debug: sending the reset STOP = 0 value')
+                    await self.send()     # send again bc STOP has been reset
 
             await asyncio.sleep(opcua_per)  # wait OPCUA period
 

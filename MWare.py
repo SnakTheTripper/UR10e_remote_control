@@ -61,8 +61,9 @@ class UR10e:
         self.joint_accel = 10
         self.linear_speed = 0.1
         self.linear_accel = 0.1
-        self.is_moving = False
-        self.STOP = False
+        self.is_moving = 0
+        self.STOP = 0
+        self.reset_STOP_flag = 0
 
         self.input_bit_0 = 0
         self.input_bit_1 = 0
@@ -93,7 +94,7 @@ class UR10e:
             else:
                 print(f'Tried updating {key}, but it not an attribute of the object!')
 
-    def gather_to_send_all(self):  # send all attributes
+    def gather_to_send_all(self):  # send all attributes (incl. target) to inactive controller
         return {key: value for key, value in self.__dict__.items() if
                 key in ['current_joint',
                         'target_joint',
@@ -105,7 +106,6 @@ class UR10e:
                         'linear_speed',
                         'linear_accel',
                         'is_moving',
-                        'STOP',
                         'input_bit_0',
                         'input_bit_1',
                         'input_bit_2',
@@ -124,12 +124,12 @@ class UR10e:
                         'output_bit_7',
                         ]}
 
-    def gather_to_send_current(self):  # send all attributes
+    def gather_to_send_current(self):  # send status updates to active controller
         return {key: value for key, value in self.__dict__.items() if
                 key in ['current_joint',
                         'current_tcp',
                         'is_moving',
-                        'STOP']}
+                        'reset_STOP_flag']} # add input bits when added to bridge
 
 class FlaskHandler:
     def __init__(self, to_flask, from_flask, to_bridge, local_ur):
@@ -151,12 +151,12 @@ class FlaskHandler:
         # send updates to Flask
         last_drops = 10
         while True:
-            if last_drops > 0 or self.local_ur10e.page_init:
+            if last_drops > 0 or self.local_ur10e.page_init or self.local_ur10e.reset_STOP_flag == 1:
                 serialized_message = None
 
-                if self.local_ur10e.control_mode == 0:
+                if self.local_ur10e.control_mode == 0:      # flask
                     serialized_message = json.dumps(self.local_ur10e.gather_to_send_current()).encode()
-                elif self.local_ur10e.control_mode == 1:
+                elif self.local_ur10e.control_mode == 1:    # opcua
                     serialized_message = json.dumps(self.local_ur10e.gather_to_send_all()).encode()
 
                 try:
@@ -184,12 +184,13 @@ class FlaskHandler:
                     print(e)
 
                 if topic == b'Move_Commands':
-                    # quickly forward to bridge
-                    await self.to_bridge_sock.send_multipart([topic, serialized_message])
-                    # then unpack and update local dataset
+                    # unpack and update local dataset
                     self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
                     message = json.loads(serialized_message.decode())
                     print(f'debug: target tcp pose: {message}')
+                    # forward to bridge
+                    await self.to_bridge_sock.send_multipart([topic, serialized_message])
+                    print(f'debug: sent to bridge, STOP =  {self.local_ur10e.STOP}')
 
                 elif topic == b'page_init':
                     self.local_ur10e.page_init = True
@@ -242,10 +243,11 @@ class OpcuaHandler:
                 print(f'Could not receive message from OPCUA Server: {e}')
 
             if topic == b'opcua_command':
-                # quickly forward to bridge
-                await self.to_bridge_sock.send_multipart([topic, serialized_message])
-                # then unpack and update local dataset
+                # unpack and update local dataset
                 self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
+                # forward to bridge
+                await self.to_bridge_sock.send_multipart([topic, serialized_message])
+
             elif topic == b"switchControl":
                 # update local control_mode
                 self.local_ur10e.control_mode = json.loads(serialized_message.decode())
@@ -259,6 +261,8 @@ class OpcuaHandler:
 async def receive_from_bridge(from_bridge_sock, local_ur10e):
     from_bridge_sock.setsockopt(zmq.SUBSCRIBE, b'Joint_States')
     while True:
+        # print(f'debug: MW STOP: {local_ur10e.STOP}')
+
         topic, serialized_message = await from_bridge_sock.recv_multipart()
         local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))  # blocking command
 async def main():

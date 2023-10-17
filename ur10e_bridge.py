@@ -21,9 +21,9 @@ asyncio.set_event_loop_policy(WindowsSelectorEventLoopPolicy())
 rtde_freq, rtde_per, opcua_freq, opcua_per = config_utils.get_frequencies()
 
 
-def round_array(array, round_to):
+def round_array(array, round_to_decimals):
     for i in range(len(array)):
-        array[i] = round(array[i], round_to)
+        array[i] = round(array[i], round_to_decimals)
     return array
 
 def d2r(x):
@@ -59,7 +59,7 @@ def rv2rpy(tcp_pose):
     rot_vec = np.array([rx, ry, rz])
 
     rotation = R.from_rotvec(rot_vec)
-    rpy = rotation.as_euler('xyz', degrees=True)
+    rpy = rotation.as_euler('yxz', degrees=True)
 
     r, p, y = rpy
     tcp_pose[3], tcp_pose[4], tcp_pose[5] = r, p, y
@@ -69,7 +69,7 @@ def rpy2rv(tcp_pose):
     r, p, y = tcp_pose[3], tcp_pose[4], tcp_pose[5]
     rpy = np.array([r, p, y])
 
-    rotation = R.from_euler('xyz', rpy, degrees=True)
+    rotation = R.from_euler('yxz', rpy, degrees=True)
     rot_vec = rotation.as_rotvec()
 
     rx, ry, rz = rot_vec
@@ -98,7 +98,6 @@ class ZmqHandler:
         print("ZMQ Connected Successfully\n")
 
         return self.sub_socket, self.pub_socket
-
 
 class RtdeHandler:
     def __init__(self):
@@ -164,7 +163,6 @@ class RtdeHandler:
 
         return rtde_r, rtde_c, ur_dashboard_socket
 
-
 class UR10e:
     def __init__(self, rtde_r, rtde_c):
         self.rtde_r = rtde_r
@@ -184,7 +182,8 @@ class UR10e:
         self.linear_speed = 0.1
         self.linear_accel = 0.1
         self.is_moving = False
-        self.STOP = False
+        self.STOP = 0
+        self.reset_STOP_flag = 0
 
     async def get_actual_from_robot(self):
         try:
@@ -200,21 +199,26 @@ class UR10e:
     def update_local_dataset(self, data_dictionary):
         for key, value in data_dictionary.items():
             if key not in ['current_joint', 'current_tcp']:
-                setattr(self, key, value)
+                try:
+                    setattr(self, key, value)
+                except Exception as e:
+                    print(f'Tried updating: {key} to value: {value} but failed\n'
+                          f'Exception: {e}')
 
     def gather_to_send(self):  # excludes unnecessary attributes
         return {key: value for key, value in self.__dict__.items() if
                 key in ['current_joint',
                         'current_tcp',
                         'is_moving',
-                        'STOP']}  # needs to send this to reset the STOP flag in Flask_server.py
-
+                        'reset_STOP_flag']}  # needs to send this to reset the STOP variable in MW
 
 class AsyncHandler:
     def __init__(self, zmq_hndlr, rtde_hndlr):
         self.zmq_handler = zmq_hndlr
         self.rtde_handler = rtde_hndlr
         self.local_ur10e = UR10e(rtde_hndlr.rtde_r, rtde_hndlr.rtde_c)
+        self.ready_for_move = False
+        self.is_stopped = False
 
     async def check_status(self):
         check_interval = 1  # seconds
@@ -255,7 +259,14 @@ class AsyncHandler:
               f'Target Joint: {self.local_ur10e.target_joint}\n'
               f'Target TCP:   {self.local_ur10e.target_tcp}')
 
-        if not self.local_ur10e.STOP:
+        self.ready_for_move = False     # because the move method has started
+        if self.local_ur10e.STOP == 0:
+            if self.is_stopped:
+                # if the robot was stopped and a new command came with STOP = 0, don't move te robot!
+                print('debug: first STOP = 0, not moving the robot')
+                self.is_stopped = False
+                return
+
             # stop current movement before starting new one
             if self.local_ur10e.is_moving:
                 rtde_handler.rtde_c.stopJ(math.pi / 2, asynchronous=False)
@@ -272,7 +283,9 @@ class AsyncHandler:
             else:
                 print("Invalid move type!")
 
-        else:
+        elif self.local_ur10e.STOP == 1:
+            self.is_stopped = True
+            print(f'debug: STOP detected by bridge. move_type = {self.local_ur10e.move_type}')
             if self.local_ur10e.move_type == 0:  # MoveL
                 self.rtde_handler.rtde_c.stopL(max(self.local_ur10e.linear_accel, math.pi),
                                                asynchronous=False)
@@ -284,9 +297,20 @@ class AsyncHandler:
             else:
                 print("Invalid move type for Stop command!")
 
-            self.local_ur10e.STOP = False  # resets stop bit after robot is stopped (gets sent to MW)
+            self.local_ur10e.reset_STOP_flag = 1  # resets stop bit after robot is stopped (gets sent to MW)
+            while self.local_ur10e.STOP == 1:
+                print(f'debug: waiting for stop = 0. STOP: {self.local_ur10e.STOP}')
+                await asyncio.sleep(rtde_per)
+            print('debug: STOP was reset to 0 by WM')
+            self.local_ur10e.reset_STOP_flag = 0
 
-    async def receive(self):
+    async def call_move(self):
+        while True:
+            if self.ready_for_move:
+                await self.moveX()
+            await asyncio.sleep(rtde_per)
+
+    async def receive_commands(self):
         while True:
             try:
                 [topic_received, message_received] = await self.zmq_handler.sub_socket.recv_multipart()
@@ -296,7 +320,7 @@ class AsyncHandler:
                 print(f"stop: {self.local_ur10e.STOP},"
                       f"move_type: {self.local_ur10e.move_type}")
 
-                await self.moveX()
+                self.ready_for_move = True      # this calls moveX(self) method
 
                 await asyncio.sleep(rtde_per)
 
@@ -318,7 +342,7 @@ class AsyncHandler:
 
     async def run(self):
         print("\033[32mStarted ASYNC function!\033[0m")
-        await asyncio.gather(self.send(), self.receive(), self.check_status())
+        await asyncio.gather(self.send(), self.receive_commands(), self.check_status(), self.call_move())
 
 
 if __name__ == "__main__":

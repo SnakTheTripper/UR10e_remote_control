@@ -24,10 +24,10 @@ rtde_frequency = 500    # [1 - 500] Hz
 opcua_frequency = 20    # [1 - rtde_frequency]
 # introduce Flask frequency too for the website!
 
-default_control_mode = 0    # 0-Flask 1-OPCUA
+default_control_mode = 1    # 0-Flask 1-OPCUA
 
 robot_home_position_joint = [-180, -60.0, -120.0, -90.0, 90.0, 0.0]
-robot_home_position_tcp = [385, -174, 595, -127, 127, 0]        # in mm
+robot_home_position_tcp = [-385, 174, 595, 180, 0, 90]        # in mm
 
 joint_limits_lower = [-359, -190, -155, -359, -90, -359]        # joint 1 to 6 all in degrees
 joint_limits_upper = [359, 10, 155, 359, 90, 359]               # joint 1 to 6
