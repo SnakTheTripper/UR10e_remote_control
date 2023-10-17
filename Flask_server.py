@@ -1,5 +1,4 @@
 import json
-import math
 import sys
 import threading
 import time
@@ -25,8 +24,8 @@ class UR10e:
         # represents last used move_type
         self.move_type = 1  # 0 = linear 1 = joint
         self.control_mode = config.default_control_mode  # 0 = flask  1 = opcua
-        self.joint_speed = 0.1
-        self.joint_accel = 0.1
+        self.joint_speed = 10
+        self.joint_accel = 10
         self.linear_speed = 0.1
         self.linear_accel = 0.1
         self.is_moving = False
@@ -113,13 +112,9 @@ def gather_config_data_for_JavaScript():
             'home_position_joint': config.robot_home_position_joint,
             'home_position_tcp': config.robot_home_position_tcp}
 
-
-def d2r(deg):
-    return deg * math.pi / 180
-
-
 def send_movement():
     message = local_ur10e.gather_to_send_command_values()  # gathers and sends relevant data from central_data to MW
+    print(f'debug: {message}')
     serialized_message = json.dumps(message)
     pub_socket.send_multipart([b"Move_Commands", serialized_message.encode()])
     # send package to web client so it updates other clients too
@@ -152,6 +147,7 @@ def receive_from_mw():  # on web client
 
         socketio.emit('update_current',
                       {'joint_positions': local_ur10e.current_joint, 'tcp_positions': local_ur10e.current_tcp})
+        print(f'debug:\n {local_ur10e.current_joint, local_ur10e.current_tcp}')
 
 
 def sendButton(data):
@@ -159,28 +155,14 @@ def sendButton(data):
     local_ur10e.move_type = m_t
 
     if local_ur10e.move_type == 0:  # moveL
-        pos = data["target_tcp_positions"]
-        v = data["linear_speed"]
-        a = data["linear_accel"]
-
-        print(f'debug: target tcp pose: {pos}')
-
-        for i in range(3):
-            local_ur10e.target_tcp[i] = pos[i] / 1000  # mm to m conversion
-        for i in range(3, 6):
-            local_ur10e.target_tcp[i] = d2r(pos[i])  # deg to rad conversion
-        local_ur10e.linear_speed = v
-        local_ur10e.linear_accel = a
+        local_ur10e.target_tcp = data["target_tcp_positions"]
+        local_ur10e.linear_speed = data["linear_speed"]
+        local_ur10e.linear_accel = data["linear_accel"]
 
     elif local_ur10e.move_type == 1:  # moveJ
-        jp = data["target_joint_positions"]
-        jv = data["joint_speed"]
-        ja = data["joint_accel"]
-
-        for i in range(6):
-            local_ur10e.target_joint[i] = d2r(jp[i])
-        local_ur10e.joint_speed = d2r(jv)  # speed slider
-        local_ur10e.joint_accel = d2r(ja)  # accel slider
+        local_ur10e.target_joint = data["target_joint_positions"]
+        local_ur10e.joint_speed = data["joint_speed"]
+        local_ur10e.joint_accel = data["joint_accel"]
 
     if local_ur10e.control_mode == 0:
         send_movement()
@@ -215,23 +197,12 @@ def stopButton():
 
 
 def addToList(data):
-    m_t = data["move_type"]  # updated local move_type variable for each ADD button press
-    local_ur10e.move_type = m_t
-    new_entry = None
+    local_ur10e.move_type = data["move_type"]  # updated local move_type variable for each ADD button press
     pos = data["target_pos"]
     v = data["speed"]
     a = data["accel"]
 
-    print(pos, v, a)
-
-    if local_ur10e.move_type == 0:
-        for i in range(3):
-            pos[i] = pos[i] / 1000  # linear: mm2m
-        new_entry = [m_t, pos[:], v, a]
-    elif local_ur10e.move_type == 1:
-        for i in range(6):
-            pos[i] = d2r(pos[i])  # joint:  d2r
-        new_entry = [m_t, pos[:], d2r(v), d2r(a)]
+    new_entry = [local_ur10e.move_type, pos, v, a]
     print(new_entry)
     local_ur10e.program_list.append(new_entry)
     socketio.emit('updateTable', {'program_list': local_ur10e.program_list})
@@ -302,6 +273,7 @@ def switchControl():
         new_control_mode = 0  # flask
     else:
         print('\033[91mInvalid control_mode value in switchControl() function\033[0m')
+        new_control_mode = 0
 
     print(f'New control_mode: {new_control_mode}')
     local_ur10e.control_mode = new_control_mode

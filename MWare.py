@@ -57,8 +57,8 @@ class UR10e:
 
         # represents last used move_type
         self.move_type = 1  # 0 = linear 1 = joint
-        self.joint_speed = 0.1
-        self.joint_accel = 0.1
+        self.joint_speed = 10
+        self.joint_accel = 10
         self.linear_speed = 0.1
         self.linear_accel = 0.1
         self.is_moving = False

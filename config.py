@@ -26,13 +26,13 @@ opcua_frequency = 20    # [1 - rtde_frequency]
 
 default_control_mode = 0    # 0-Flask 1-OPCUA
 
-robot_home_position_joint = [0, -60.0, -120.0, -90.0, 90.0, 0.0]
+robot_home_position_joint = [-180, -60.0, -120.0, -90.0, 90.0, 0.0]
 robot_home_position_tcp = [385, -174, 595, -127, 127, 0]        # in mm
 
 joint_limits_lower = [-359, -190, -155, -359, -90, -359]        # joint 1 to 6 all in degrees
 joint_limits_upper = [359, 10, 155, 359, 90, 359]               # joint 1 to 6
-tcp_limits_lower = [-1000, -1000, 100, -359, -359, -359]        # xyz (mm)a nd rx ry rz (deg)
-tcp_limits_upper = [1000, 1000, 1480, 359, 359, 359]            # xyz and rx ry rz
+tcp_limits_lower = [-1000, -1000, 100, -180, -180, -180]        # xyz (mm)a nd rx ry rz (deg)
+tcp_limits_upper = [1000, 1000, 1480, 180, 180, 180]            # xyz and rx ry rz
 
 # have a predefined waypoint list on server start
 starter_program = programs.tcp_test

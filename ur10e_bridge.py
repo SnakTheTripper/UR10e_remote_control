@@ -20,34 +20,63 @@ asyncio.set_event_loop_policy(WindowsSelectorEventLoopPolicy())
 # Set then check Update frequency for RTDE & OPCUA
 rtde_freq, rtde_per, opcua_freq, opcua_per = config_utils.get_frequencies()
 
+
+def round_array(array, round_to):
+    for i in range(len(array)):
+        array[i] = round(array[i], round_to)
+    return array
+
 def d2r(x):
     return x * math.pi / 180
 def r2d(x):
     return x * 180 / math.pi
+
+
+def array_r2d(pos_array):
+    for i in range(6):
+        pos_array[i] = r2d(pos_array[i])
+    return pos_array
+def array_d2r(elements_to_convert, pos_array):
+    for i in range(elements_to_convert):
+        pos_array[i] = d2r(pos_array[i])
+    return pos_array
+
+
+def m2mm(pos_array):
+    for i in range(3):
+        pos_array[i] = pos_array[i] * 1000
+
+    return pos_array
+def mm2m(pos_array):
+    for i in range(3):
+        pos_array[i] = pos_array[i] / 1000
+
+    return pos_array
+
 
 def rv2rpy(tcp_pose):
     rx, ry, rz = tcp_pose[3], tcp_pose[4], tcp_pose[5]
     rot_vec = np.array([rx, ry, rz])
 
     rotation = R.from_rotvec(rot_vec)
-    rpy = rotation.as_euler('xyz', degrees=False)
+    rpy = rotation.as_euler('xyz', degrees=True)
 
     r, p, y = rpy
     tcp_pose[3], tcp_pose[4], tcp_pose[5] = r, p, y
 
     return tcp_pose
-
 def rpy2rv(tcp_pose):
     r, p, y = tcp_pose[3], tcp_pose[4], tcp_pose[5]
     rpy = np.array([r, p, y])
 
-    rotation = R.from_euler('xyz', rpy)
+    rotation = R.from_euler('xyz', rpy, degrees=True)
     rot_vec = rotation.as_rotvec()
 
     rx, ry, rz = rot_vec
     tcp_pose[3], tcp_pose[4], tcp_pose[5] = rx, ry, rz
 
     return tcp_pose
+
 
 class ZmqHandler:
     def __init__(self):
@@ -69,6 +98,7 @@ class ZmqHandler:
         print("ZMQ Connected Successfully\n")
 
         return self.sub_socket, self.pub_socket
+
 
 class RtdeHandler:
     def __init__(self):
@@ -115,7 +145,7 @@ class RtdeHandler:
 
         return self.rtde_c
 
-    def connect_ur_dashboard(self):   # RTDEScriptClient API
+    def connect_ur_dashboard(self):  # RTDEScriptClient API
         print('Connecting UR Dashboard Client...')
         try:
             self.ur_dashboard_client.connect()
@@ -133,6 +163,7 @@ class RtdeHandler:
         ur_dashboard_socket = self.connect_ur_dashboard()
 
         return rtde_r, rtde_c, ur_dashboard_socket
+
 
 class UR10e:
     def __init__(self, rtde_r, rtde_c):
@@ -157,9 +188,8 @@ class UR10e:
 
     async def get_actual_from_robot(self):
         try:
-            self.current_joint = self.rtde_r.getActualQ()
-            self.current_tcp = self.rtde_r.getActualTCPPose()
-            self.current_tcp = rv2rpy(self.current_tcp)
+            self.current_joint = round_array(array_r2d(pos_array=self.rtde_r.getActualQ()), 2)
+            self.current_tcp = round_array(m2mm(rv2rpy(self.rtde_r.getActualTCPPose())), 2)
         except Exception as e:
             print(e)
         if any(element != 0 for element in self.rtde_r.getActualQd()):
@@ -177,7 +207,8 @@ class UR10e:
                 key in ['current_joint',
                         'current_tcp',
                         'is_moving',
-                        'STOP']}     # needs to send this to reset the STOP flag in Flask_server.py
+                        'STOP']}  # needs to send this to reset the STOP flag in Flask_server.py
+
 
 class AsyncHandler:
     def __init__(self, zmq_hndlr, rtde_hndlr):
@@ -186,14 +217,14 @@ class AsyncHandler:
         self.local_ur10e = UR10e(rtde_hndlr.rtde_r, rtde_hndlr.rtde_c)
 
     async def check_status(self):
-        check_interval = 1      # seconds
+        check_interval = 1  # seconds
         while True:
             if self.rtde_handler.rtde_c and not self.rtde_handler.rtde_c.isConnected():
                 self.rtde_handler.rtde_c.reconnect()
 
             status_bit = self.rtde_handler.rtde_r.getSafetyMode()
 
-            if status_bit != 1:      # not Normal Mode
+            if status_bit != 1:  # not Normal Mode
                 print("STOP DETECTED!")
 
             while status_bit != 1:
@@ -201,7 +232,7 @@ class AsyncHandler:
                     try:
                         print('Protective Stop detected. Attempting to clear in 5 seconds...')
                         for i in range(5):
-                            print(5-i)
+                            print(5 - i)
                             await asyncio.sleep(1)
                         self.rtde_handler.ur_dashboard_client.unlockProtectiveStop()
                         print('Protective Stop cleared!')
@@ -215,32 +246,41 @@ class AsyncHandler:
 
                 status_bit = self.rtde_handler.rtde_r.getSafetyMode()
 
-                await asyncio.sleep(check_interval)     # inner loop interval
+                await asyncio.sleep(check_interval)  # inner loop interval
 
-            await asyncio.sleep(check_interval)         # outer loop interval
+            await asyncio.sleep(check_interval)  # outer loop interval
 
-    async def moveX(self, move_type, target_joint, target_tcp, v_joint, a_joint, v_lin, a_lin, stop):
-        if not stop:
+    async def moveX(self):
+        print(f'debug:\n'
+              f'Target Joint: {self.local_ur10e.target_joint}\n'
+              f'Target TCP:   {self.local_ur10e.target_tcp}')
+
+        if not self.local_ur10e.STOP:
             # stop current movement before starting new one
             if self.local_ur10e.is_moving:
                 rtde_handler.rtde_c.stopJ(math.pi / 2, asynchronous=False)
 
-            if move_type == 0:  # MoveL
-                target_tcp = rpy2rv(target_tcp)
-                self.rtde_handler.rtde_c.moveL(target_tcp, v_lin, a_lin, asynchronous=True)  # True for non-blocking
+            if self.local_ur10e.move_type == 0:  # MoveL
+                target_tcp = mm2m(rpy2rv(self.local_ur10e.target_tcp))
+                self.rtde_handler.rtde_c.moveL(target_tcp, self.local_ur10e.linear_speed, self.local_ur10e.linear_accel,
+                                               asynchronous=True)  # True for non-blocking
 
-            elif move_type == 1:  # MoveJ
-                print(self.local_ur10e.target_joint)
-                self.rtde_handler.rtde_c.moveJ(target_joint, v_joint, a_joint, asynchronous=True)  # True for async (non-blocking)
+            elif self.local_ur10e.move_type == 1:  # MoveJ
+                target_joint = array_d2r(6, self.local_ur10e.target_joint)
+                self.rtde_handler.rtde_c.moveJ(target_joint, d2r(self.local_ur10e.joint_speed), d2r(self.local_ur10e.joint_accel),
+                                               asynchronous=True)  # True for async (non-blocking)
             else:
                 print("Invalid move type!")
 
-
         else:
-            if move_type == 0:      # MoveL
-                self.rtde_handler.rtde_c.stopL(max(a_lin, math.pi), asynchronous=False)       # async=True sometimes drops control script. Difficult to reconnect.
-            elif move_type == 1:    # MoveJ
-                self.rtde_handler.rtde_c.stopJ(max(a_lin, math.pi), asynchronous=False)     # async=False added benefit: easy to know when robot came to a stop.
+            if self.local_ur10e.move_type == 0:  # MoveL
+                self.rtde_handler.rtde_c.stopL(max(self.local_ur10e.linear_accel, math.pi),
+                                               asynchronous=False)
+                # async=True sometimes drops control script. Difficult to reconnect.
+            elif self.local_ur10e.move_type == 1:  # MoveJ
+                self.rtde_handler.rtde_c.stopJ(max(self.local_ur10e.joint_accel, math.pi),
+                                               asynchronous=False)
+                # async=False added benefit: easy to know when robot came to a stop.
             else:
                 print("Invalid move type for Stop command!")
 
@@ -256,10 +296,7 @@ class AsyncHandler:
                 print(f"stop: {self.local_ur10e.STOP},"
                       f"move_type: {self.local_ur10e.move_type}")
 
-                await self.moveX(self.local_ur10e.move_type, self.local_ur10e.target_joint,
-                                 self.local_ur10e.target_tcp, self.local_ur10e.joint_speed,
-                                 self.local_ur10e.joint_accel, self.local_ur10e.linear_speed,
-                                 self.local_ur10e.linear_accel, self.local_ur10e.STOP)
+                await self.moveX()
 
                 await asyncio.sleep(rtde_per)
 
