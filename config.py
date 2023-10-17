@@ -1,4 +1,4 @@
-from ur10e_programs import demo
+from ur10e_programs import programs
 
 ip_address_ur10 = "10.0.0.100"      # URSim on Snak's Laptop
 
@@ -20,16 +20,19 @@ port_mw_f = 5558        # MW to Flask
 port_mw_op = 5559       # MW to OPCUA
 port_op_mw = 5560       # OPCUA to MW
 
-rtde_frequency = 100    # [1 - 500] Hz
-opcua_frequency = 1    # [1 - rtde_frequency]
+rtde_frequency = 500    # [1 - 500] Hz
+opcua_frequency = 20    # [1 - rtde_frequency]
+# introduce Flask frequency too for the website!
 
-robot_home_position_joint = [0.5, -90.5, 0.5, -90.5, 0.5, 0.5]
-robot_home_position_tcp = [500, 0, 1000, 0, 0, 0]    # in mm
+default_control_mode = 1    # 0-Flask 1-OPCUA
 
-joint_limits_lower = [-359, -190, -155, -359, -90, -359]     # joint 1 to 6  all in degrees
-joint_limits_upper = [359, 10, 155, 359, 90, 359]     # joint 1 to 6
-tcp_limits_lower = [-1000, -1000, 100, -359, -359, -359]       # xyz and rx ry rz
-tcp_limits_upper = [1000, 1000, 1480, 359, 359, 359]       # xyz and rx ry rz
+robot_home_position_joint = [-180, -60.0, -120.0, -90.0, 90.0, 0.0]
+robot_home_position_tcp = [-385, 174, 595, 180, 0, 90]        # in mm
+
+joint_limits_lower = [-359, -190, -155, -359, -90, -359]        # joint 1 to 6 all in degrees
+joint_limits_upper = [359, 10, 155, 359, 90, 359]               # joint 1 to 6
+tcp_limits_lower = [-1000, -1000, 100, -180, -180, -180]        # xyz (mm)a nd rx ry rz (deg)
+tcp_limits_upper = [1000, 1000, 1480, 180, 180, 180]            # xyz and rx ry rz
 
 # have a predefined waypoint list on server start
-starter_program = demo.program_list
+starter_program = programs.tcp_test
