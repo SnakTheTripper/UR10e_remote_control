@@ -9,9 +9,9 @@ from datetime import datetime, timedelta
 import config
 import config_utils
 
-# Set then check Update frequency for RTDE & OPCUA
-rtde_freq, rtde_per, opcua_freq, opcua_per = config_utils.get_frequencies()
-
+# Set then check Update frequency for Flask
+freq_dict = config_utils.get_frequencies()
+flask_per = freq_dict['flask_per']
 
 class UR10e:
     def __init__(self):
@@ -32,28 +32,22 @@ class UR10e:
         self.STOP = 0
         self.reset_STOP_flag = 0
 
-        self.input_bit_0 = 0
-        self.input_bit_1 = 0
-        self.input_bit_2 = 0
-        self.input_bit_3 = 0
-        self.input_bit_4 = 0
-        self.input_bit_5 = 0
-        self.input_bit_6 = 0
-        self.input_bit_7 = 0
+        # current digital inputs
+        self.standard_input_bits = [0] * 8
+        self.configurable_input_bits = [0] * 8
+        self.tool_input_bits = [0] * 2
 
-        self.output_bit_0 = 0
-        self.output_bit_1 = 0
-        self.output_bit_2 = 0
-        self.output_bit_3 = 0
-        self.output_bit_4 = 0
-        self.output_bit_5 = 0
-        self.output_bit_6 = 0
-        self.output_bit_7 = 0
+        # current digital outputs
+        self.standard_output_bits = [0] * 8
+        self.configurable_output_bits = [0] * 8
+        self.tool_output_bits = [0] * 2
+
+        # target digital outputs
+        self.target_standard_output_bits = [0] * 8
+        self.target_configurable_output_bits = [0] * 8
+        self.target_tool_output_bits = [0] * 2
 
         self.page_init = False
-
-        # only used locally
-
         self.program_list = []
 
     def update_local_dataset(self, data_dictionary):
@@ -73,6 +67,11 @@ class UR10e:
                 'linear_accel': self.linear_accel,
                 'STOP': self.STOP
                 }
+
+    def gather_to_send_output_bits(self):
+        return {'target_standard_output_bits': self.target_standard_output_bits,
+                'target_configurable_output_bits': self.target_configurable_output_bits,
+                'target_tool_output_bits': self.target_tool_output_bits}
 
     def set_target_to_current(self):
         self.target_tcp = self.current_tcp
@@ -113,22 +112,28 @@ def gather_config_data_for_JavaScript():
             'home_position_joint': config.robot_home_position_joint,
             'home_position_tcp': config.robot_home_position_tcp}
 
+
 def send_movement():
     message = local_ur10e.gather_to_send_command_values()  # gathers and sends relevant data from central_data to MW
-    serialized_message = json.dumps(message)
-    pub_socket.send_multipart([b"Move_Commands", serialized_message.encode()])
-    # send package to web client so it updates other clients too
-    socketio.emit('update_target_positions',
-                  {'target_joint_positions': local_ur10e.target_joint,
-                   'target_tcp_positions': local_ur10e.target_tcp,
-                   'speedJ': local_ur10e.joint_speed,
-                   'accelJ': local_ur10e.joint_accel,
-                   'speedL': local_ur10e.linear_speed,
-                   'accelL': local_ur10e.linear_accel})
+    serialized_message = json.dumps(message).encode()
+    pub_socket.send_multipart([b"Move_Command", serialized_message])
+    # send package to web clients, so it updates other clients too
+    web_update_target_positions()
 
+def send_output_bits(data):
+    # update local dataset with targets from website
+    local_ur10e.target_standard_output_bits = data["target_standard_output_bits"]
+    local_ur10e.target_configurable_output_bits = data["target_configurable_output_bits"]
+    local_ur10e.target_tool_output_bits = data["target_tool_output_bits"]
+
+    # send newly updated targets to MW
+    message = local_ur10e.gather_to_send_output_bits()
+    serialized_message = json.dumps(message).encode()
+    pub_socket.send_multipart([b"output_bit_command", serialized_message])
+    # send package to web clients, so it updates other clients too
+    web_update_target_IO()
 
 def receive_from_mw():  # on web client
-    global page_initialization
     topic = None
     received_message = None
     while True:
@@ -144,22 +149,52 @@ def receive_from_mw():  # on web client
         elif topic == b"switchControl":
             local_ur10e.control_mode = json.loads(received_message.decode())
             print(f'local control_mode set by OPCUA to {local_ur10e.control_mode}')
+            socketio.emit('update_control_mode', {'control_mode': local_ur10e.control_mode})
 
-        if local_ur10e.control_mode == 0:   # flask
-            socketio.emit('update_current',
-                          {'current_joint': local_ur10e.current_joint, 'current_tcp': local_ur10e.current_tcp})
+        if local_ur10e.control_mode == 0:  # flask
+            # update current, target is defined by web client
+            web_update_current_positions()
+            web_update_current_IO()
 
-        elif local_ur10e.control_mode == 1: # opcua
-            socketio.emit('update_current',
-                          {'current_joint': local_ur10e.current_joint, 'current_tcp': local_ur10e.current_tcp})
-            socketio.emit('update_target_positions',
-                          {'target_joint_positions': local_ur10e.target_joint,
-                           'target_tcp_positions': local_ur10e.target_tcp,
-                           'speedJ': local_ur10e.joint_speed,
-                           'accelJ': local_ur10e.joint_accel,
-                           'speedL': local_ur10e.linear_speed,
-                           'accelL': local_ur10e.linear_accel})
-                            # add output bits here
+        elif local_ur10e.control_mode == 1:  # opcua
+            # update current (from bridge) AND target (from opcua)
+            web_update_current_positions()
+            web_update_target_positions()
+            web_update_current_IO()
+            web_update_target_IO()
+
+
+def web_update_current_positions():
+    socketio.emit('update_current_positions',
+                  {'current_joint': local_ur10e.current_joint,
+                   'current_tcp': local_ur10e.current_tcp})
+
+def web_update_target_positions():
+    socketio.emit('update_target_positions',
+                  {'target_joint_positions': local_ur10e.target_joint,
+                   'target_tcp_positions': local_ur10e.target_tcp,
+                   'speedJ': local_ur10e.joint_speed,
+                   'accelJ': local_ur10e.joint_accel,
+                   'speedL': local_ur10e.linear_speed,
+                   'accelL': local_ur10e.linear_accel})
+
+def web_update_current_IO():
+    socketio.emit('update_current_IO',
+                  {'standard_input_bits': local_ur10e.standard_input_bits,
+                   'configurable_input_bits': local_ur10e.configurable_input_bits,
+                   'tool_input_bits': local_ur10e.tool_input_bits,
+                   'standard_output_bits': local_ur10e.standard_output_bits,
+                   'configurable_output_bits': local_ur10e.configurable_output_bits,
+                   'tool_output_bits': local_ur10e.tool_output_bits})
+
+def web_update_target_IO():
+    socketio.emit('update_target_IO',
+                  {
+                      'target_standard_output_bits': local_ur10e.target_standard_output_bits,
+                      'target_configurable_output_bits': local_ur10e.target_configurable_output_bits,
+                      'target_tool_output_bits': local_ur10e.target_tool_output_bits,
+                  })
+
 
 def sendButton(data):
     m_t = data["move_type"]  # comes with every SEND button press (1 from joint, 0 from TCP control webpage)
@@ -193,17 +228,17 @@ def stopButton():
     if last_stop_time and now - last_stop_time < timedelta(seconds=2):
         print('Spamming stop button not permitted.')
     else:
-        if local_ur10e.is_moving:           # only send if moving
+        if local_ur10e.is_moving:  # only send if moving
             last_stop_time = now
-            local_ur10e.STOP = 1            # will be reset by reply from robot
-            socketio.emit('STOP_button')    # for alert on webpage
-            send_movement()                 # send STOP signal
+            local_ur10e.STOP = 1  # will be reset by reply from robot
+            socketio.emit('STOP_button')  # for alert on webpage
+            send_movement()  # send STOP signal
 
             # robot will send reset_STOP_flag after coming to a complete stop
 
             while local_ur10e.reset_STOP_flag == 0:
                 print('debug: Waiting for resset_STOP_flag to turn to 1')
-                time.sleep(rtde_per)        # wait until reset_STOP_flag comes from robot
+                time.sleep(flask_per)  # wait until reset_STOP_flag comes from robot
 
             print('debug: reset_STOP_flag turned to 1! DONE! Resetting STOP to 0')
             local_ur10e.STOP = 0
@@ -263,14 +298,16 @@ def runProgram():
                     local_ur10e.joint_accel = local_ur10e.program_list[i][3]
 
                 send_movement()
-
                 print(f"Doing move nr. {i + 1}")
-                time.sleep(1)  # between waypoints
 
+                time.sleep(1)
                 while local_ur10e.is_moving:
                     if global_stop_flag:
                         break
-                    time.sleep(rtde_per)
+                    time.sleep(flask_per)
+
+                time.sleep(1)  # between waypoints
+
                 if global_stop_flag:
                     break
 
@@ -302,6 +339,8 @@ def switchControl():
     print(f'New control_mode: {new_control_mode}')
     local_ur10e.control_mode = new_control_mode
     pub_socket.send_multipart([topic, json.dumps(new_control_mode).encode()])
+
+    socketio.emit('update_control_mode', {'control_mode': local_ur10e.control_mode})
 
 
 @app.route('/', methods=['GET', 'POST'])
@@ -338,6 +377,8 @@ def handle_buttons(command_data):
         sendButton(command_data)
     elif command_data["action"] == "stop":
         stopButton()
+    elif command_data["action"] == "send_output_bits":
+        send_output_bits(command_data)
     elif command_data["action"] == "addToList":
         addToList(command_data)
     elif command_data["action"] == "deleteFromList":  # just deletes the last waypoint
@@ -353,20 +394,26 @@ def handle_buttons(command_data):
 
 
 @socketio.on('page_init')
-def handle_moving_event():  # start current_position flow after page load for initialization
+def page_init():  # start current_position flow after page load for initialization
     global page_initialization
 
     page_initialization = True
-    pub_socket.send_multipart([b"page_init", b'blank'])  # makes MWare send current positions to server (here)
 
     # Send signal to initialize target sliders
-    socketio.emit('target_slider_init', {'current_joint_positions': local_ur10e.current_joint,
-                                         'current_tcp_positions': local_ur10e.current_tcp,
-                                         'current_joint_speed': local_ur10e.joint_speed,
-                                         'current_joint_accel': local_ur10e.joint_accel,
-                                         'current_tcp_speed': local_ur10e.linear_speed,
-                                         'current_tcp_accel': local_ur10e.linear_accel,
-                                         'program_list': local_ur10e.program_list})
+    socketio.emit('page_init_values', {'current_joint_positions': local_ur10e.current_joint,
+                                       'current_tcp_positions': local_ur10e.current_tcp,
+                                       'current_joint_speed': local_ur10e.joint_speed,
+                                       'current_joint_accel': local_ur10e.joint_accel,
+                                       'current_tcp_speed': local_ur10e.linear_speed,
+                                       'current_tcp_accel': local_ur10e.linear_accel,
+                                       'program_list': local_ur10e.program_list,
+                                       'control_mode': local_ur10e.control_mode,
+                                       'standard_input_bits': local_ur10e.standard_input_bits,
+                                       'configurable_input_bits': local_ur10e.configurable_input_bits,
+                                       'tool_input_bits': local_ur10e.tool_input_bits,
+                                       'standard_output_bits': local_ur10e.standard_output_bits,
+                                       'configurable_output_bits': local_ur10e.configurable_output_bits,
+                                       'tool_output_bits': local_ur10e.tool_output_bits})
 
 
 @socketio.on('keep_alive')

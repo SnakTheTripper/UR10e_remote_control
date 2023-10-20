@@ -17,11 +17,11 @@ import config_utils
 import ur10e_object
 from datetime import datetime
 
-# Set then check Update frequency for RTDE & OPCUA
-rtde_freq, rtde_per, opcua_freq, opcua_per = config_utils.get_frequencies()
+# Set then check Update frequency for OPCUA
+freq_dict = config_utils.get_frequencies()
+opcua_per = freq_dict['opcua_per']
 
 prev_time = datetime.now()
-
 
 async def freq_calc():
     global prev_time
@@ -33,6 +33,8 @@ async def freq_calc():
         print(f"Update Frequency: {frequency:.2f} Hz")
 
     prev_time = current_time
+
+
 def initialize_OPCUA_server():
     try:
         server = Server()
@@ -55,6 +57,8 @@ def initialize_OPCUA_server():
 
     except Exception as e:
         print(f'Error starting OPCUA Server: {e}')
+
+
 def initialize_ZMQ_connection():
     while True:
         try:
@@ -73,6 +77,7 @@ def initialize_ZMQ_connection():
         except Exception as e:
             print(f'Error: {e}\nRetrying connection...')
 
+
 class UR10e:
     def __init__(self):
         self.current_joint = [0.0] * 6
@@ -82,8 +87,8 @@ class UR10e:
         self.target_tcp = [0.0] * 6
 
         # represents last used move_type
-        self.move_type = 1      # 0 = linear 1 = joint
-        self.control_mode = config.default_control_mode   # 0 = flask  1 = opcua
+        self.move_type = 1  # 0 = linear 1 = joint
+        self.control_mode = config.default_control_mode  # 0 = flask  1 = opcua
         self.joint_speed = 0.1
         self.joint_accel = 0.1
         self.linear_speed = 0.1
@@ -92,25 +97,23 @@ class UR10e:
         self.STOP = 0
         self.reset_STOP_flag = 0
 
-        self.input_bit_0 = 0
-        self.input_bit_1 = 0
-        self.input_bit_2 = 0
-        self.input_bit_3 = 0
-        self.input_bit_4 = 0
-        self.input_bit_5 = 0
-        self.input_bit_6 = 0
-        self.input_bit_7 = 0
+        # current digital inputs
+        self.standard_input_bits = [0] * 8
+        self.configurable_input_bits = [0] * 8
+        self.tool_input_bits = [0] * 2
 
-        self.output_bit_0 = 0
-        self.output_bit_1 = 0
-        self.output_bit_2 = 0
-        self.output_bit_3 = 0
-        self.output_bit_4 = 0
-        self.output_bit_5 = 0
-        self.output_bit_6 = 0
-        self.output_bit_7 = 0
+        # current digital outputs
+        self.standard_output_bits = [0] * 8
+        self.configurable_output_bits = [0] * 8
+        self.tool_output_bits = [0] * 2
 
-        self.SEND_FLAG = 0
+        # target digital outputs
+        self.target_standard_output_bits = [0] * 8
+        self.target_configurable_output_bits = [0] * 8
+        self.target_tool_output_bits = [0] * 2
+
+        self.SEND_MOVEMENT = 0
+        self.SEND_OUTPUT_BITS = 0
 
     def update_local_from_mw(self, message):
         for key, value in message.items():
@@ -127,8 +130,13 @@ class UR10e:
                 'joint_accel': self.joint_accel,
                 'linear_speed': self.linear_speed,
                 'linear_accel': self.linear_accel,
-                'STOP': self.STOP
-                }
+                'STOP': self.STOP}
+
+    def gather_to_send_output_bits(self):
+        return {'target_standard_output_bits': self.target_standard_output_bits,
+                'target_configurable_output_bits': self.target_configurable_output_bits,
+                'target_tool_output_bits': self.target_tool_output_bits}
+
 
 class OpcuaValueHandler:
     def __init__(self, opcua_dataset, local_ur):
@@ -141,24 +149,28 @@ class OpcuaValueHandler:
             "Current Wrist 1": self.opcua_dataset[3],
             "Current Wrist 2": self.opcua_dataset[4],
             "Current Wrist 3": self.opcua_dataset[5],
+
             "Target Base": self.opcua_dataset[6],
             "Target Shoulder": self.opcua_dataset[7],
             "Target Elbow": self.opcua_dataset[8],
             "Target Wrist 1": self.opcua_dataset[9],
             "Target Wrist 2": self.opcua_dataset[10],
             "Target Wrist 3": self.opcua_dataset[11],
+
             "Current x": self.opcua_dataset[12],
             "Current y": self.opcua_dataset[13],
             "Current z": self.opcua_dataset[14],
-            "Current rx": self.opcua_dataset[15],
-            "Current ry": self.opcua_dataset[16],
-            "Current rz": self.opcua_dataset[17],
+            "Current Roll": self.opcua_dataset[15],
+            "Current Pitch": self.opcua_dataset[16],
+            "Current Yaw": self.opcua_dataset[17],
+
             "Target x": self.opcua_dataset[18],
             "Target y": self.opcua_dataset[19],
             "Target z": self.opcua_dataset[20],
-            "Target rx": self.opcua_dataset[21],
-            "Target ry": self.opcua_dataset[22],
-            "Target rz": self.opcua_dataset[23],
+            "Target Roll": self.opcua_dataset[21],
+            "Target Pitch": self.opcua_dataset[22],
+            "Target Yaw": self.opcua_dataset[23],
+
             "move_type": self.opcua_dataset[24],
             "control_mode": self.opcua_dataset[25],
             "Joint Speed": self.opcua_dataset[26],
@@ -166,34 +178,31 @@ class OpcuaValueHandler:
             "TCP Speed": self.opcua_dataset[28],
             "TCP Acceleration": self.opcua_dataset[29],
             "is_moving": self.opcua_dataset[30],
-            "input_bit_0": self.opcua_dataset[31],
-            "input_bit_1": self.opcua_dataset[32],
-            "input_bit_2": self.opcua_dataset[33],
-            "input_bit_3": self.opcua_dataset[34],
-            "input_bit_4": self.opcua_dataset[35],
-            "input_bit_5": self.opcua_dataset[36],
-            "input_bit_6": self.opcua_dataset[37],
-            "input_bit_7": self.opcua_dataset[38],
-            "output_bit_0": self.opcua_dataset[39],
-            "output_bit_1": self.opcua_dataset[40],
-            "output_bit_2": self.opcua_dataset[41],
-            "output_bit_3": self.opcua_dataset[42],
-            "output_bit_4": self.opcua_dataset[43],
-            "output_bit_5": self.opcua_dataset[44],
-            "output_bit_6": self.opcua_dataset[45],
-            "output_bit_7": self.opcua_dataset[46],
-            "SEND FLAG": self.opcua_dataset[47],
-            "STOP": self.opcua_dataset[48]
+
+            "standard_input_bits": self.opcua_dataset[31],
+            "configurable_input_bits": self.opcua_dataset[32],
+            "tool_input_bits": self.opcua_dataset[33],
+
+            "standard_output_bits": self.opcua_dataset[34],
+            "configurable_output_bits": self.opcua_dataset[35],
+            "tool_output_bits": self.opcua_dataset[36],
+
+            "target_standard_output_bits": self.opcua_dataset[37],
+            "target_configurable_output_bits": self.opcua_dataset[38],
+            "target_tool_output_bits": self.opcua_dataset[39],
+
+            "SEND MOVEMENT": self.opcua_dataset[40],
+            "SEND OUTPUT BITS": self.opcua_dataset[41],
+            "STOP": self.opcua_dataset[42]
         }
 
     def update_opcua_from_local(self):
-
         # only update targets on opcua server when flask is in control
-        if self.local_ur10e.control_mode == 0:  # flask
+        if self.local_ur10e.control_mode == 0:      # Flask
             # Updating target joint and TCP positions only when not in 'opcua' control_mode
             browse_names_target_joint = ["Target Base", "Target Shoulder", "Target Elbow", "Target Wrist 1",
                                          "Target Wrist 2", "Target Wrist 3"]
-            browse_names_target_tcp = ["Target x", "Target y", "Target z", "Target rx", "Target ry", "Target rz"]
+            browse_names_target_tcp = ["Target x", "Target y", "Target z", "Target Roll", "Target Pitch", "Target Yaw"]
 
             for i, name in enumerate(browse_names_target_joint):
                 self.browse_name_to_var[name].set_value(self.local_ur10e.target_joint[i])
@@ -215,7 +224,7 @@ class OpcuaValueHandler:
         # Updating current joint and TCP positions
         browse_names_current_joint = ["Current Base", "Current Shoulder", "Current Elbow", "Current Wrist 1",
                                       "Current Wrist 2", "Current Wrist 3"]
-        browse_names_current_tcp = ["Current x", "Current y", "Current z", "Current rx", "Current ry", "Current rz"]
+        browse_names_current_tcp = ["Current x", "Current y", "Current z", "Current Roll", "Current Pitch", "Current Yaw"]
 
         for i, name in enumerate(browse_names_current_joint):
             self.browse_name_to_var[name].set_value(self.local_ur10e.current_joint[i])
@@ -225,17 +234,31 @@ class OpcuaValueHandler:
 
         # Update Digital Inputs
         for i in range(8):
-            name = f'input_bit_{i}'
-            self.browse_name_to_var[name].set_value(getattr(self.local_ur10e, name))
+            self.browse_name_to_var['standard_input_bits'][i].set_value(self.local_ur10e.standard_input_bits[i])
+            self.browse_name_to_var['configurable_input_bits'][i].set_value(self.local_ur10e.configurable_input_bits[i])
+        for i in range(2):
+            self.browse_name_to_var['tool_input_bits'][i].set_value(self.local_ur10e.tool_input_bits[i])
 
+        # Update Digital Outputs
         for i in range(8):
-            name = f'output_bit_{i}'
-            self.browse_name_to_var[name].set_value(getattr(self.local_ur10e, name))
+            self.browse_name_to_var['standard_output_bits'][i].set_value(self.local_ur10e.standard_output_bits[i])
+            self.browse_name_to_var['configurable_output_bits'][i].set_value(self.local_ur10e.configurable_output_bits[i])
+
+        for i in range(2):
+            self.browse_name_to_var['tool_output_bits'][i].set_value(self.local_ur10e.tool_output_bits[i])
+
+        if self.local_ur10e.control_mode == 0:      # Flask
+            # Updating Target Digital Outputs only when not in 'opcua' control_mode
+            for i in range(8):
+                self.browse_name_to_var['target_standard_output_bits'][i].set_value(self.local_ur10e.target_standard_output_bits[i])
+                self.browse_name_to_var['target_configurable_output_bits'][i].set_value(self.local_ur10e.target_configurable_output_bits[i])
+            for i in range(2):
+                self.browse_name_to_var['target_tool_output_bits'][i].set_value(self.local_ur10e.target_tool_output_bits[i])
 
     def update_local_from_opcua(self):
         browse_names_target_joint = ["Target Base", "Target Shoulder", "Target Elbow", "Target Wrist 1",
                                      "Target Wrist 2", "Target Wrist 3"]
-        browse_names_target_tcp = ["Target x", "Target y", "Target z", "Target rx", "Target ry", "Target rz"]
+        browse_names_target_tcp = ["Target x", "Target y", "Target z", "Target Roll", "Target Pitch", "Target Yaw"]
 
         for i, name in enumerate(browse_names_target_joint):
             self.local_ur10e.target_joint[i] = self.browse_name_to_var[name].get_value()
@@ -243,20 +266,7 @@ class OpcuaValueHandler:
         for i, name in enumerate(browse_names_target_tcp):
             self.local_ur10e.target_tcp[i] = self.browse_name_to_var[name].get_value()
 
-        # NOT Updating current joint and TCP positions
-
-        # browse_names_current_joint = ["Current Base", "Current Shoulder", "Current Elbow", "Current Wrist 1",
-        #                               "Current Wrist 2", "Current Wrist 3"]
-        # browse_names_current_tcp = ["Current x", "Current y", "Current z", "Current rx", "Current ry", "Current rz"]
-        #
-        # for i, name in enumerate(browse_names_current_joint):
-        #     self.local_ur10e.current_joint[i] = self.browse_name_to_var[name].get_value()
-        #
-        # for i, name in enumerate(browse_names_current_tcp):
-        #     self.local_ur10e.current_tcp[i] = self.browse_name_to_var[name].get_value()
-
         # Update Control
-
         self.local_ur10e.move_type = self.browse_name_to_var["move_type"].get_value()
         self.local_ur10e.control_mode = self.browse_name_to_var["control_mode"].get_value()
         self.local_ur10e.joint_speed = self.browse_name_to_var["Joint Speed"].get_value()
@@ -266,25 +276,28 @@ class OpcuaValueHandler:
         self.local_ur10e.is_moving = self.browse_name_to_var["is_moving"].get_value()
         self.local_ur10e.STOP = self.browse_name_to_var["STOP"].get_value()
 
-        # Update Digital Inputs
-        # CHANGE THESE TO GET_VALUE
+        # Update Target Digital Outputs
         for i in range(8):
-            name = f'input_bit_{i}'
-            self.browse_name_to_var[name].set_value(getattr(self.local_ur10e, name))
+            self.local_ur10e.target_standard_output_bits[i] = self.browse_name_to_var['target_standard_output_bits'][i].get_value()
 
-        # IDK if digital outputs should be writable or not
-        # they were set to writable in ur10e_object... (?)
         for i in range(8):
-            name = f'output_bit_{i}'
-            self.browse_name_to_var[name].set_value(getattr(self.local_ur10e, name))
+            self.local_ur10e.target_configurable_output_bits[i] = self.browse_name_to_var['target_configurable_output_bits'][i].get_value()
 
-        self.local_ur10e.SEND_FLAG = self.browse_name_to_var["SEND FLAG"].get_value()
+        for i in range(2):
+            self.local_ur10e.target_tool_output_bits[i] = self.browse_name_to_var['target_tool_output_bits'][i].get_value()
 
-    def reset_send_flag(self):
-        self.browse_name_to_var["SEND FLAG"].set_value(self.local_ur10e.SEND_FLAG)
+        self.local_ur10e.SEND_MOVEMENT = self.browse_name_to_var["SEND MOVEMENT"].get_value()
+        self.local_ur10e.SEND_OUTPUT_BITS = self.browse_name_to_var["SEND OUTPUT BITS"].get_value()
+
+    def reset_send_movement_flag(self):
+        self.browse_name_to_var["SEND MOVEMENT"].set_value(self.local_ur10e.SEND_MOVEMENT)
+
+    def reset_send_output_bit_flag(self):
+        self.browse_name_to_var["SEND OUTPUT BITS"].set_value(self.local_ur10e.SEND_OUTPUT_BITS)
 
     def reset_stop_flag(self):
-            self.browse_name_to_var["STOP"].set_value(self.local_ur10e.STOP)
+        self.browse_name_to_var["STOP"].set_value(self.local_ur10e.STOP)
+
 
 class MiddlewareHandler:
     def __init__(self, from_mw, to_mw, opcua_dataset, local_ur, opcua_value_handler):
@@ -296,10 +309,15 @@ class MiddlewareHandler:
 
         self.init_done = False
 
-    async def send(self):
+    async def send_movement(self):
         message = self.local_ur10e.gather_to_send_command_values()
         serialized_message = json.dumps(message).encode()
-        await self.to_mw_sock.send_multipart([b"opcua_command", serialized_message])
+        await self.to_mw_sock.send_multipart([b"Move_Command", serialized_message])
+
+    async def send_output_bits(self):
+        message = self.local_ur10e.gather_to_send_output_bits()
+        serialized_message = json.dumps(message).encode()
+        await self.to_mw_sock.send_multipart([b"output_bit_command", serialized_message])
 
     async def receive_from_mw(self):
         topic = None
@@ -338,28 +356,32 @@ class MiddlewareHandler:
 
             if self.local_ur10e.control_mode == 1:  # opcua
 
-                if self.local_ur10e.SEND_FLAG == 1:
-                    # send target positions to mw with zmq
-                    print('debig: SEND "button" pressed, sending target to MW')
-                    await self.send()
-
-                    self.local_ur10e.SEND_FLAG = 0      # reset send flag so it acts like a button
-                    self.opcua_value_handler.reset_send_flag()
-
-                elif self.local_ur10e.STOP == 1:
-                    print('debug: sending STOP = 1')
-                    await self.send()
+                if self.local_ur10e.STOP == 1:
+                    await self.send_movement()
 
                     while self.local_ur10e.reset_STOP_flag == 0:
                         print('debug: waiting for reset_STOP_flag from MW')
                         await asyncio.sleep(opcua_per)  # get stuck here until reset_STOP_flag arrives from bridge
 
-                    self.local_ur10e.STOP = 0       # reset STOP when reset_STOP_flag arrives
+                    self.local_ur10e.STOP = 0  # reset STOP when reset_STOP_flag arrives
                     self.opcua_value_handler.reset_stop_flag()
                     print('debug: sending the reset STOP = 0 value')
-                    await self.send()     # send again bc STOP has been reset
+                    await self.send_movement()  # send again bc STOP has been reset
+
+                elif self.local_ur10e.SEND_MOVEMENT == 1:
+                    await self.send_movement()
+
+                    self.local_ur10e.SEND_MOVEMENT = 0  # reset send flag so it acts like a button
+                    self.opcua_value_handler.reset_send_movement_flag()
+
+                elif self.local_ur10e.SEND_OUTPUT_BITS == 1:
+                    await self.send_output_bits()
+
+                    self.local_ur10e.SEND_OUTPUT_BITS = 0   # reset value so it acts like a button
+                    self.opcua_value_handler.reset_send_output_bit_flag()
 
             await asyncio.sleep(opcua_per)  # wait OPCUA period
+
 
 async def main():
     local_ur10e = UR10e()
@@ -368,10 +390,11 @@ async def main():
     from_mw_socket, to_mw_socket = initialize_ZMQ_connection()
 
     opcua_value_handler = OpcuaValueHandler(opcua_dataset, local_ur10e)
-    middleware_handler = MiddlewareHandler(from_mw_socket, to_mw_socket, opcua_dataset, local_ur10e, opcua_value_handler)
+    middleware_handler = MiddlewareHandler(from_mw_socket, to_mw_socket, opcua_dataset, local_ur10e,
+                                           opcua_value_handler)
 
     await asyncio.gather(middleware_handler.receive_from_mw(),
-                   middleware_handler.send_to_mw())
+                         middleware_handler.send_to_mw())
 
 
 if __name__ == "__main__":
