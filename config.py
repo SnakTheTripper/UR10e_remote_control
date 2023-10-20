@@ -21,10 +21,11 @@ port_mw_op = 5559       # MW to OPCUA
 port_op_mw = 5560       # OPCUA to MW
 
 rtde_frequency = 500    # [1 - 500] Hz
+flask_frequency = 500   # [1 - rtde_frequency]
 opcua_frequency = 20    # [1 - rtde_frequency]
 # introduce Flask frequency too for the website!
 
-default_control_mode = 1    # 0-Flask 1-OPCUA
+default_control_mode = 0    # 0-Flask 1-OPCUA
 
 robot_home_position_joint = [-180, -60.0, -120.0, -90.0, 90.0, 0.0]
 robot_home_position_tcp = [-385, 174, 595, 180, 0, 90]        # in mm

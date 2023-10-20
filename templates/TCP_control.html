@@ -67,6 +67,8 @@
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script>
+        let control_mode = 0
+
         var program_list = []                      // kept updated
         const configData = {{ config_data | tojson | safe }};
         console.log('configData from config.py:')
@@ -76,15 +78,12 @@
         const jointLimitsUpper = configData.joint_limits_upper;
         const tcpLimitsLower = configData.tcp_limits_lower;
         const tcpLimitsUpper = configData.tcp_limits_upper;
+        const homePositionJoint = configData.home_position_joint
         const homePositionTCP = configData.home_position_tcp
         // console.log(homePosition)
 
         socket = io.connect('http://' + configData.ip_address_flask + ':' + configData.port_flask)
 
-        function r2d(radians) {
-            return radians * (180 / Math.PI);
-
-        }
         function updateTable(program_list) {
             let tableBody = document.getElementById('waypointTable').getElementsByTagName('tbody')[0];
             tableBody.innerHTML = "";  // Clear existing rows
@@ -100,43 +99,40 @@
 
                 // console.log(program_list)
                 const move_type = program_list[i][0]
-                                let tcpPositionsInMillimeters
-                let jointPositionsInDegrees
+                let tcpPositionsInMillimeters = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                let jointPositionsInDegrees = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
                 if (move_type === 0) {
-                    tcpPositionsInMillimeters = program_list[i][1].map((pos) => (1000*pos).toFixed(0));
+                    for (let j = 0 ; j < 6 ; j++) {
+                        tcpPositionsInMillimeters[j] = program_list[i][1][j]
+                    }
                     cell1.innerHTML = "L";
-                    cell2.innerHTML = tcpPositionsInMillimeters
+                    cell2.innerHTML = tcpPositionsInMillimeters.toString();
                     cell3.innerHTML = (program_list[i][2]).toFixed(1);  // Speed
                     cell4.innerHTML = (program_list[i][3]).toFixed(1);  // Acceleration
                 }else if (move_type === 1) {
-                    jointPositionsInDegrees = program_list[i][1].map((pos) => r2d(pos).toFixed(0));
+                    for (let j = 0 ; j < 6 ; j++) {
+                        jointPositionsInDegrees[j] = program_list[i][1][j]
+                    }
                     cell1.innerHTML = "J"
                     cell2.innerHTML = jointPositionsInDegrees.toString();
-                    cell3.innerHTML = r2d(program_list[i][2]).toFixed(1);  // Speed
-                    cell4.innerHTML = r2d(program_list[i][3]).toFixed(1);  // Acceleration
+                    cell3.innerHTML = program_list[i][2].toFixed(1);  // Speed
+                    cell4.innerHTML = program_list[i][3].toFixed(1);  // Acceleration
                 }
             }
         }
         function updateValue(slider, output) {
             const degrees = parseFloat(slider.value);
             document.getElementById(output).innerText = degrees.toFixed(2); // Display as degrees with 2 decimal places
-
         }
         function updateCurrentPosition(joint, position) {
             const slider = document.getElementById(`current_tcp_${joint}`);
-            if (joint < 3) {
-                position_mm = position * 1000
-                slider.value = position_mm;
-                document.getElementById(`current_tcp_box_${joint}`).innerText = position_mm.toFixed(2);
-            } else {
-                slider.value = r2d(position)
-                document.getElementById(`current_tcp_box_${joint}`).innerText = r2d(position).toFixed(2);
-            }
+            slider.value = position;
+            document.getElementById(`current_tcp_box_${joint}`).innerText = position.toFixed(2);
             updateValue(slider, `current_tcp_${joint}`);
         }
         function setSliderLimits() {
             for (let i = 0; i < 6; i++) {
-                const target_slider = document.getElementById(`tcp_${i}`);
+                const target_slider = document.getElementById(`target_tcp_${i}`);
                 const current_slider = document.getElementById(`current_tcp_${i}`);
                 if (target_slider) {
                     target_slider.min = tcpLimitsLower[i];
@@ -150,8 +146,11 @@
 
         // button functions
 
-        function goToTCP() {
+        function goToJoint() {
             window.location.href = '/joint_control';
+        }
+        function switchControl() {
+            socket.emit('button_press', {action: 'switchControl'})
         }
         function goToHome() {
             window.location.href = '/';
@@ -161,19 +160,19 @@
 
             let slider = document.getElementById(id);
             slider.value = parseFloat(slider.value) + 1;  // adjust step size here
-            updateValue(slider, 'output_tcp_' + id.split('_')[1]);
+            updateValue(slider, 'target_tcp_box_' + id.split('_')[2]);
         }
         function decreaseSlider(id) {
             console.log("DecreaseSlider called with id: ", id);
 
             let slider = document.getElementById(id);
             slider.value = parseFloat(slider.value) - 1;  // adjust step size here
-            updateValue(slider, 'output_tcp_' + id.split('_')[1]);
+            updateValue(slider, 'target_tcp_box_' + id.split('_')[2]);
         }
         function handleSend() {
             const tcp_p = [];
             for (let i = 0; i < 6; i++) {
-                tcp_p.push(parseFloat(document.getElementById(`tcp_${i}`).value));
+                tcp_p.push(parseFloat(document.getElementById(`target_tcp_${i}`).value));
             }
             const tcp_s = parseFloat(document.getElementById('tcp_speed').value);
             const tcp_a = parseFloat(document.getElementById('tcp_accel').value);
@@ -193,19 +192,31 @@
                 const upperLimit = tcpLimitsUpper[i];
                 const randomValue = lowerLimit + (Math.random() * (upperLimit - lowerLimit));
 
-                const tcpInput = document.getElementById(`tcp_${i}`);
-                const outputSpan = document.getElementById(`output_tcp_${i}`);
+                const tcpInput = document.getElementById(`target_tcp_${i}`);
+                const outputSpan = document.getElementById(`target_tcp_box_${i}`);
 
                 if (tcpInput && outputSpan) {
                     tcpInput.value = randomValue;
-                    updateValue(tcpInput, `output_tcp_${i}`);
+                    updateValue(tcpInput, `target_tcp_box_${i}`);
                 }
             }
         }
-        function setHomePosition() {
+        function sendHome() {
+            // send home with moveJ to "untangle" joints
+            socket.emit('button_press', {action: 'send',
+            move_type: 1,           // for joint control
+            target_joint_positions: homePositionJoint,
+            target_tcp_positions: homePositionTCP,
+            joint_speed: 10,
+            joint_accel: 10})
+
+            console.log('TCP home positions are: ' + homePositionTCP)
+
             for (let i = 0; i < 6; i++) {
-                document.getElementById(`tcp_${i}`).value = homePositionTCP[i];
-                updateValue(document.getElementById(`tcp_${i}`), `output_tcp_${i}`);
+                const tcpSlider = document.getElementById(`target_tcp_${i}`);
+                tcpSlider.value = homePositionTCP[i];
+                updateValue(tcpSlider, `target_tcp_${i}`);
+                // updateValue(tcpSlider, `target_tcp_box_${i}`);
             }
         }
         function handleStop() {
@@ -214,7 +225,7 @@
         function addToList() {
             const tcp_p = [];
             for (let i = 0; i < 6; i++) {
-                tcp_p.push(parseFloat(document.getElementById(`tcp_${i}`).value));
+                tcp_p.push(parseFloat(document.getElementById(`target_tcp_${i}`).value));
             }
             const tcp_v = parseFloat(document.getElementById('tcp_speed').value);
             const tcp_a = parseFloat(document.getElementById('tcp_accel').value);
@@ -243,15 +254,11 @@
         // called whenever SEND button used
         socket.on('update_target_positions', function(data) {
             let target_positions = data.target_tcp_positions;
-            for (let i = 0; i < 3; i++) {
-                const jointSlider = document.getElementById(`tcp_${i}`);
-                jointSlider.value = target_positions[i] * 1000;
-                updateValue(jointSlider, `output_tcp_${i}`);
-            }
-            for (let i = 3; i < 6; i++) {
-                const jointSlider = document.getElementById(`tcp_${i}`);
-                jointSlider.value = r2d(target_positions[i]);
-                updateValue(jointSlider, `output_tcp_${i}`);
+            for (let i = 0; i < 6; i++) {
+                const tcpSlider = document.getElementById(`target_tcp_${i}`);
+                tcpSlider.value = target_positions[i];
+                updateValue(tcpSlider, `target_tcp_${i}`);
+                updateValue(tcpSlider, `target_tcp_box_${i}`);
             }
 
             let target_speed = data.speedL;
@@ -264,31 +271,45 @@
             const accel_slider = document.getElementById('tcp_accel');
             speed_slider.value = target_speed
             accel_slider.value = target_accel
-            updateValue(speed_slider, 'output_tcp_speed')
-            updateValue(accel_slider, 'output_tcp_accel')
+            updateValue(speed_slider, 'tcp_speed_box')
+            updateValue(accel_slider, 'tcp_accel_box')
         });
 
         // Initializes target_position sliders with current_position values for aesthetics (target = current)
-        socket.on('target_slider_init', function (data) {
+        socket.on('page_init_values', function (data) {
+            // itialize control mode switcher button
+            control_mode = data.control_mode
+            const switchControlButton = document.getElementById('switchControlButton')
+            if (control_mode === 0) {
+                button_text = 'Switch Control to OPCUA';
+            }else if (control_mode === 1) {
+                button_text = 'Switch Control to Flask'
+            }
+            switchControlButton.innerText = button_text;
+
             let current_tcp_pos = data.current_tcp_positions
+            let current_tcp_s = data.current_tcp_speed
+            let current_tcp_a = data.current_tcp_accel
             program_list = data.program_list
-            for (let i = 0; i < 3; i++) {       // x y z - m2mm
-                const tcpSlider = document.getElementById(`tcp_${i}`);
-                tcpSlider.value = current_tcp_pos[i] * 1000;
-                updateValue(tcpSlider, `tcp_${i}`);
-                updateValue(tcpSlider, `output_tcp_${i}`);
+
+            for (let i = 0; i < 6; i++) {       // x y z - m2mm
+                const tcpSlider = document.getElementById(`target_tcp_${i}`);
+                tcpSlider.value = current_tcp_pos[i];
+                updateValue(tcpSlider, `target_tcp_${i}`);
+                updateValue(tcpSlider, `target_tcp_box_${i}`);
             }
-            for(let i = 3; i < 6; i++) {        // rx ry rz - r2d
-                const tcpSlider = document.getElementById(`tcp_${i}`);
-                tcpSlider.value = r2d(current_tcp_pos[i]);
-                updateValue(tcpSlider, `tcp_${i}`);
-                updateValue(tcpSlider, `output_tcp_${i}`);
-            }
+
             // update speed and accel sliders too
             const speedSlider = document.getElementById('tcp_speed')
             const accelSlider = document.getElementById('tcp_accel')
-            updateValue(speedSlider, 'output_tcp_speed')
-            updateValue(accelSlider, 'output_tcp_accel')
+            updateValue(speedSlider, 'tcp_speed_box')
+            updateValue(accelSlider, 'tcp_accel_box')
+
+            speedSlider.value = current_tcp_s
+            accelSlider.value = current_tcp_a
+            updateValue(speedSlider, 'tcp_speed_box')
+            updateValue(accelSlider, 'tcp_accel_box')
+
             updateTable(program_list)
         });
 
@@ -296,6 +317,16 @@
             program_list = data.program_list
             updateTable(program_list)
         });
+        socket.on('update_control_mode', function (data) {
+            control_mode = data.control_mode;
+            const switchControlButton = document.getElementById('switchControlButton')
+            if (control_mode === 0) {
+                button_text = 'Switch Control to OPCUA';
+            }else if (control_mode === 1) {
+                button_text = 'Switch Control to Flask'
+            }
+            switchControlButton.innerText = button_text;
+        })
         socket.on('program_end', function(data) {
             alert('Program ran to the end')
         });
@@ -308,15 +339,45 @@
         socket.on('connect', function() {
             console.log('Websocket connected!');
         });
-        socket.on('disconnect', function() {
+        socket.on('disconnect', reconnectSocket);
+        function reconnectSocket() {
             console.log('Websocket disconnected, retrying...');
             socket = io.connect('http://10.0.0.225:5000');
-        });
+
+            socket.on('connect', function() {
+                console.log('Successfully reconnected!');
+                // Remove the 'connect' and 'disconnect' listeners to avoid stacking them.
+                socket.off('connect');
+                socket.off('disconnect');
+            });
+
+            socket.on('disconnect', function() {
+                // Delay before trying to reconnect
+                setTimeout(reconnectSocket, 3000);
+            });
+        }
         socket.on('update_current', function(data) {
             const positions = data.tcp_positions;
-            console.log(positions);
+            // console.log(positions);
             for (let i = 0; i < 6; i++) {
                 updateCurrentPosition(i, positions[i]);
+            }
+
+            const standard_input_bits = data.standard_input_bits;
+            const configurable_input_bits = data.configurable_input_bits;
+            const tool_input_bits = data.tool_input_bits;
+            const standard_output_bits = data.standard_output_bits;
+            const configurable_output_bits = data.configurable_output_bits;
+            const tool_output_bits = data.tool_output_bits;
+
+            for (let i = 0; i < 8; i++) {
+                // update all except tool bit displays (i and o)
+                // document.getElementById()
+                // .setValue or whatever
+                // update
+            }
+            for (let i = 0; i < 2; i++) {
+                // update tool i and o bit displays
             }
         });
 
@@ -345,26 +406,27 @@
 <body class="center-container">
     <form action="/" method="post">
         <div class="top-button-row">
-            <button type="button" onclick="goToTCP()">Switch to JOINT Control</button>
+            <button type="button" onclick="goToJoint()">Switch to JOINT Control</button>
+            <button type="button" onclick="switchControl()" id="switchControlButton">Switch Control Mode</button>
             <button type="button" style="text-align: right" onclick="goToHome()">Home Page</button>
         </div>
         <br>
         <table>
             <caption>TCP Control</caption>
-            {% set row_names = ['TCP X:', 'TCP Y:', 'TCP Z:', 'TCP Rx:', 'TCP Ry:', 'TCP Rz:'] %}
+            {% set row_names = ['TCP X:', 'TCP Y:', 'TCP Z:', 'TCP Roll:', 'TCP Pitch:', 'TCP Yaw:'] %}
             {% for i in range(6) %}
                 <tr class="tcp-row" , style="text-align: center">
                     <th scope="row"><label>{{ row_names[i] }}</label></th>
                     <td><span id="current_tcp_box_{{ i }}">0.00</span></td>
                     <td class="tcp-slider-wrapper">
                         <div style="display: flex; justify-content: space-between;">
-                            <button type="button" onclick="decreaseSlider('tcp_{{ i }}')">-</button>
-                            <input type="range" id="tcp_{{ i }}" name="tcp_{{ i }}" class="target-slider" min="-360" max="360" step="1" value="{{ request.form['tcp_' ~ i] }}" oninput="updateValue(this, 'output_tcp_{{ i }}')">
+                            <button type="button" onclick="decreaseSlider('target_tcp_{{ i }}')">-</button>
+                            <input type="range" id="target_tcp_{{ i }}" name="target_tcp_{{ i }}" class="target-slider" min="-360" max="360" step="1" value="{{ request.form['target_tcp_' ~ i] }}" oninput="updateValue(this, 'target_tcp_box_{{ i }}')">
                             <input type="range" id="current_tcp_{{ i }}" name="current_tcp_{{ i }}" class="current-slider" min="-360" max="360" step="1">
-                            <button type="button" onclick="increaseSlider('tcp_{{ i }}')">+</button>
+                            <button type="button" onclick="increaseSlider('target_tcp_{{ i }}')">+</button>
                         </div>
                     </td>
-                    <td style="text-align: center"><span id="output_tcp_{{ i }}">0.00</span></td>
+                    <td style="text-align: center"><span id="target_tcp_box_{{ i }}">0.00</span></td>
                 </tr>
             {% endfor %}
             <tr class="parameter_row">
@@ -373,11 +435,11 @@
                 <td class="tcp-slider-wrapper" >
                     <div style="display: flex; justify-content: space-between">
                         <button type="button" onclick="decreaseSlider('tcp_speed')">-</button>
-                        <input type="range" class="target-slider" id="tcp_speed" name="tcp_speed" min="0.1" max="3" step="0.1" value="{{ request.form['tcp_speed']|default('0.1') }}" oninput="updateValue(this, 'output_tcp_speed')">
+                        <input type="range" class="target-slider" id="tcp_speed" name="tcp_speed" min="0.1" max="3" step="0.1" value="{{ request.form['tcp_speed']|default('0.1') }}" oninput="updateValue(this, 'tcp_speed_box')">
                         <button type="button" onclick="increaseSlider('tcp_speed')">+</button>
                     </div>
                 </td>
-                <td><span id="output_tcp_speed">0.00</span></td>
+                <td><span id="tcp_speed_box">0.00</span></td>
             </tr>
             <tr class="parameter_row">
                 <th scope="row" style="text-align: center"><label> Acceleration (m/s^2):</label></th>
@@ -385,19 +447,20 @@
                 <td class="tcp-slider-wrapper">
                     <div style="display: flex; justify-content: space-between">
                         <button type="button" onclick="decreaseSlider('tcp_accel')">-</button>
-                        <input type="range" class="target-slider" id="tcp_accel" name="tcp_accel" min="0.1" max="3" step="0.1" value="{{ request.form['tcp_accel']|default('0.1') }}" oninput="updateValue(this, 'output_tcp_accel')">
+                        <input type="range" class="target-slider" id="tcp_accel" name="tcp_accel" min="0.1" max="3" step="0.1" value="{{ request.form['tcp_accel']|default('0.1') }}" oninput="updateValue(this, 'tcp_accel_box')">
                         <button type="button" onclick="increaseSlider('tcp_accel')">+</button>
                     </div>
-                <td><span id="output_tcp_accel">0.00</span></td>
+                <td><span id="tcp_accel_box">0.00</span></td>
             </tr>
         </table><br>
         <div class="center-container">
-            <button type="button" onclick="handleSend()">SEND</button>
             <button type="button" onclick="randomizeTCPValues()">Randomize TCP Values</button>
-            <button type="button" onclick="setHomePosition()">Set Home Position</button>
+            <button type="button" onclick="sendHome()">Send Home</button>
         </div>
         <br>
         <div class="center-container">
+            <button style="background-color: green; height: 50px; width: 100px" type="button" onclick="handleSend()">SEND</button>
+            <div style="width: 50px;"></div> <!-- Empty element for spacing -->
             <button style="background-color: crimson; height: 50px; width: 100px" type="button" onclick="handleStop()">STOP</button>
         </div>
         <br><br><br>        <!-- PROGRAM LIST -->

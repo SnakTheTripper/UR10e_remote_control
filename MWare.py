@@ -10,8 +10,12 @@ from asyncio.windows_events import WindowsSelectorEventLoopPolicy
 
 asyncio.set_event_loop_policy(WindowsSelectorEventLoopPolicy())
 
-# Set then check Update frequency for RTDE & OPCUA
-rtde_freq, rtde_per, opcua_freq, opcua_per = config_utils.get_frequencies()
+# Set then check Update frequency for Flask and OPCUA
+freq_dict = config_utils.get_frequencies()
+flask_per = freq_dict['flask_per']
+opcua_per = freq_dict['opcua_per']
+
+
 def initialize_zmq_connections(context):
     to_bridge_socket = context.socket(zmq.PUB)
     from_bridge_socket = context.socket(zmq.SUB)
@@ -55,8 +59,9 @@ class UR10e:
         self.current_tcp = [0.0] * 6
         self.target_tcp = [0.0] * 6
 
-        # represents last used move_type
-        self.move_type = 1  # 0 = linear 1 = joint
+        self.move_type = 1  # 0 = linear 1 = joint (represents last used move_type)
+        self.control_mode = config.default_control_mode  # 0 = flask  1 = opcua
+
         self.joint_speed = 10
         self.joint_accel = 10
         self.linear_speed = 0.1
@@ -65,27 +70,22 @@ class UR10e:
         self.STOP = 0
         self.reset_STOP_flag = 0
 
-        self.input_bit_0 = 0
-        self.input_bit_1 = 0
-        self.input_bit_2 = 0
-        self.input_bit_3 = 0
-        self.input_bit_4 = 0
-        self.input_bit_5 = 0
-        self.input_bit_6 = 0
-        self.input_bit_7 = 0
+        # current digital inputs
+        self.standard_input_bits = [0] * 8
+        self.configurable_input_bits = [0] * 8
+        self.tool_input_bits = [0] * 2
 
-        self.output_bit_0 = 0
-        self.output_bit_1 = 0
-        self.output_bit_2 = 0
-        self.output_bit_3 = 0
-        self.output_bit_4 = 0
-        self.output_bit_5 = 0
-        self.output_bit_6 = 0
-        self.output_bit_7 = 0
+        # current digital outputs
+        self.standard_output_bits = [0] * 8
+        self.configurable_output_bits = [0] * 8
+        self.tool_output_bits = [0] * 2
+
+        # target digital outputs
+        self.target_standard_output_bits = [0] * 8
+        self.target_configurable_output_bits = [0] * 8
+        self.target_tool_output_bits = [0] * 2
 
         self.page_init = False
-
-        self.control_mode = config.default_control_mode  # 0 = flask  1 = opcua
 
     def update_local_dataset(self, data_dictionary):
         for key, value in data_dictionary.items():
@@ -106,22 +106,18 @@ class UR10e:
                         'linear_speed',
                         'linear_accel',
                         'is_moving',
-                        'input_bit_0',
-                        'input_bit_1',
-                        'input_bit_2',
-                        'input_bit_3',
-                        'input_bit_4',
-                        'input_bit_5',
-                        'input_bit_6',
-                        'input_bit_7',
-                        'output_bit_0',
-                        'output_bit_1',
-                        'output_bit_2',
-                        'output_bit_3',
-                        'output_bit_4',
-                        'output_bit_5',
-                        'output_bit_6',
-                        'output_bit_7',
+
+                        'standard_input_bits',
+                        'configurable_input_bits',
+                        'tool_input_bits',
+
+                        'standard_output_bits',
+                        'configurable_output_bits',
+                        'tool_output_bits',
+
+                        'target_standard_output_bits',
+                        'target_configurable_output_bits',
+                        'target_tool_output_bits'
                         ]}
 
     def gather_to_send_current(self):  # send status updates to active controller
@@ -129,7 +125,16 @@ class UR10e:
                 key in ['current_joint',
                         'current_tcp',
                         'is_moving',
-                        'reset_STOP_flag']} # add input bits when added to bridge
+                        'reset_STOP_flag',
+
+                        'standard_input_bits',
+                        'configurable_input_bits',
+                        'tool_input_bits',
+
+                        'standard_output_bits',
+                        'configurable_output_bits',
+                        'tool_output_bits'
+                        ]}      # add input bits when added to bridge
 
 class FlaskHandler:
     def __init__(self, to_flask, from_flask, to_bridge, local_ur):
@@ -138,39 +143,37 @@ class FlaskHandler:
         self.to_bridge_sock = to_bridge
 
         self.from_flask_sock = from_flask
-        self.from_flask_sock.setsockopt(zmq.SUBSCRIBE, b"Move_Commands")
+        self.from_flask_sock.setsockopt(zmq.SUBSCRIBE, b"Move_Command")
+        self.from_flask_sock.setsockopt(zmq.SUBSCRIBE, b"output_bit_command")
         self.from_flask_sock.setsockopt(zmq.SUBSCRIBE, b"page_init")
         self.from_flask_sock.setsockopt(zmq.SUBSCRIBE, b"switchControl")
 
         self.local_ur10e = local_ur
+
+        self.standby_period = 1             # for frequency of 1 Hz
+        self.flask_period = flask_per       # by default coming from config_utils.py
+        # period between checking if standby or rtde period should be used in sending current states to Flask
+        self.calculate_flask_frequency_period = 0.1
 
     def set_cross_dependency(self, opcua_handler):
         self.opcua_handler = opcua_handler
 
     async def send(self):
         # send updates to Flask
-        last_drops = 10
         while True:
-            if last_drops > 0 or self.local_ur10e.page_init or self.local_ur10e.reset_STOP_flag == 1:
-                serialized_message = None
+            serialized_message = None
 
-                if self.local_ur10e.control_mode == 0:      # flask
-                    serialized_message = json.dumps(self.local_ur10e.gather_to_send_current()).encode()
-                elif self.local_ur10e.control_mode == 1:    # opcua
-                    serialized_message = json.dumps(self.local_ur10e.gather_to_send_all()).encode()
+            if self.local_ur10e.control_mode == 0:      # flask
+                serialized_message = json.dumps(self.local_ur10e.gather_to_send_current()).encode()
+            elif self.local_ur10e.control_mode == 1:    # opcua
+                serialized_message = json.dumps(self.local_ur10e.gather_to_send_all()).encode()
 
-                try:
-                    await self.to_flask_sock.send_multipart([b"Joint_States", serialized_message])
-                except Exception as e:
-                    print(f'Can not send update to Flask: {e}')
+            try:
+                await self.to_flask_sock.send_multipart([b"Joint_States", serialized_message])
+            except Exception as e:
+                print(f'Can not send update to Flask: {e}')
 
-                if not self.local_ur10e.is_moving:
-                    last_drops -= 1  # decrease only when not moving
-
-            if self.local_ur10e.is_moving:
-                last_drops = 10
-
-            await asyncio.sleep(rtde_per)
+            await asyncio.sleep(self.flask_period)
 
     async def receive(self):
         topic = None
@@ -183,7 +186,7 @@ class FlaskHandler:
                 except Exception as e:
                     print(e)
 
-                if topic == b'Move_Commands':
+                if topic == b'Move_Command':
                     # unpack and update local dataset
                     self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
                     message = json.loads(serialized_message.decode())
@@ -192,10 +195,11 @@ class FlaskHandler:
                     await self.to_bridge_sock.send_multipart([topic, serialized_message])
                     print(f'debug: sent to bridge, STOP =  {self.local_ur10e.STOP}')
 
-                elif topic == b'page_init':
-                    self.local_ur10e.page_init = True
-                    await asyncio.sleep(5 * rtde_per)
-                    self.local_ur10e.page_init = False
+                elif topic == b'output_bit_command':
+                    # unpack and update local dataset
+                    self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
+                    # forward to bridge
+                    await self.to_bridge_sock.send_multipart([topic, serialized_message])
 
                 elif topic == b"switchControl":
                     # set local control_mode value to opcua
@@ -206,6 +210,16 @@ class FlaskHandler:
                     await self.opcua_handler.to_opcua_sock.send_multipart([b"switchControl", serialized_message])
                     print(f'control_mode {self.local_ur10e.control_mode} sent to opcua server')
 
+    async def calculate_flask_frequency(self):
+        while True:
+            if self.local_ur10e.is_moving or self.local_ur10e.STOP:
+                self.flask_period = flask_per
+            else:
+                self.flask_period = self.standby_period
+
+            print(f'flask period: {self.flask_period}')
+            await asyncio.sleep(self.calculate_flask_frequency_period)
+
 class OpcuaHandler:
     def __init__(self, to_opcua, from_opcua, to_bridge, local_ur):
         self.flask_handler = None
@@ -213,7 +227,8 @@ class OpcuaHandler:
         self.to_bridge_sock = to_bridge
 
         self.from_opcua_sock = from_opcua
-        self.from_opcua_sock.setsockopt(zmq.SUBSCRIBE, b"opcua_command")
+        self.from_opcua_sock.setsockopt(zmq.SUBSCRIBE, b"Move_Command")
+        self.from_opcua_sock.setsockopt(zmq.SUBSCRIBE, b"output_bit_command")
         self.from_opcua_sock.setsockopt(zmq.SUBSCRIBE, b"switchControl")
 
         self.local_ur10e = local_ur
@@ -230,7 +245,10 @@ class OpcuaHandler:
             elif self.local_ur10e.control_mode == 1:  # opcua
                 serialized_message = json.dumps(self.local_ur10e.gather_to_send_current()).encode()
 
-            await self.to_opcua_sock.send_multipart([b"update_package", serialized_message])
+            try:
+                await self.to_opcua_sock.send_multipart([b"update_package", serialized_message])
+            except Exception as e:
+                print(f'Can not send update to OPCUA: {e}')
             await asyncio.sleep(opcua_per)
 
     async def receive(self):  # receive from OPCUA
@@ -242,7 +260,13 @@ class OpcuaHandler:
             except Exception as e:
                 print(f'Could not receive message from OPCUA Server: {e}')
 
-            if topic == b'opcua_command':
+            if topic == b'Move_Command':
+                # unpack and update local dataset
+                self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
+                # forward to bridge
+                await self.to_bridge_sock.send_multipart([topic, serialized_message])
+
+            elif topic == b"output_bit_command":
                 # unpack and update local dataset
                 self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
                 # forward to bridge
@@ -261,10 +285,9 @@ class OpcuaHandler:
 async def receive_from_bridge(from_bridge_sock, local_ur10e):
     from_bridge_sock.setsockopt(zmq.SUBSCRIBE, b'Joint_States')
     while True:
-        # print(f'debug: MW STOP: {local_ur10e.STOP}')
-
         topic, serialized_message = await from_bridge_sock.recv_multipart()
         local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))  # blocking command
+
 async def main():
     local_ur10e = UR10e()
 
@@ -285,6 +308,7 @@ async def main():
 
     await asyncio.gather(flask_handler.send(),
                          flask_handler.receive(),
+                         flask_handler.calculate_flask_frequency(),
                          opcua_handler.send(),
                          opcua_handler.receive(),
                          receive_from_bridge(from_bridge_socket, local_ur10e))
