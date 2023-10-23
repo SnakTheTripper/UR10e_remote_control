@@ -1,6 +1,4 @@
 import math
-from scipy.spatial.transform import Rotation as R
-import numpy as np
 import time
 from asyncio.windows_events import WindowsSelectorEventLoopPolicy
 import asyncio
@@ -13,81 +11,15 @@ import rtde_io
 import dashboard_client
 import zmq.asyncio
 import config
-import config_utils
+import project_utils as pu
 
 # disable when running on Linux based systems
 asyncio.set_event_loop_policy(WindowsSelectorEventLoopPolicy())
 
 # Set then check Update frequency for RTDE
-freq_dict = config_utils.get_frequencies()
+freq_dict = pu.get_frequencies()
 rtde_freq = freq_dict['rtde_freq']
 rtde_per = freq_dict['rtde_per']
-
-
-def round_array(array, round_to_decimals):
-    for i in range(len(array)):
-        array[i] = round(array[i], round_to_decimals)
-    return array
-
-
-def d2r(x):
-    return x * math.pi / 180
-
-
-def r2d(x):
-    return x * 180 / math.pi
-
-
-def array_r2d(elements_to_convert, pos_array):
-    for i in range(elements_to_convert):
-        pos_array[i] = r2d(pos_array[i])
-    return pos_array
-
-
-def array_d2r(elements_to_convert, pos_array):
-    for i in range(elements_to_convert):
-        pos_array[i] = d2r(pos_array[i])
-    return pos_array
-
-
-def m2mm(pos_array):
-    for i in range(3):
-        pos_array[i] = pos_array[i] * 1000
-
-    return pos_array
-
-
-def mm2m(pos_array):
-    for i in range(3):
-        pos_array[i] = pos_array[i] / 1000
-
-    return pos_array
-
-
-def rv2rpy(tcp_pose):
-    rx, ry, rz = tcp_pose[3], tcp_pose[4], tcp_pose[5]
-    rot_vec = np.array([rx, ry, rz])
-
-    rotation = R.from_rotvec(rot_vec)
-    rpy = rotation.as_euler('yxz', degrees=True)
-
-    r, p, y = rpy
-    tcp_pose[3], tcp_pose[4], tcp_pose[5] = r, p, y
-
-    return tcp_pose
-
-
-def rpy2rv(tcp_pose):
-    r, p, y = tcp_pose[3], tcp_pose[4], tcp_pose[5]
-    rpy = np.array([r, p, y])
-
-    rotation = R.from_euler('yxz', rpy, degrees=True)
-    rot_vec = rotation.as_rotvec()
-
-    rx, ry, rz = rot_vec
-    tcp_pose[3], tcp_pose[4], tcp_pose[5] = rx, ry, rz
-
-    return tcp_pose
 
 
 class ZmqHandler:
@@ -245,8 +177,8 @@ class UR10e:
 
     async def get_actual_from_robot(self):
         try:
-            self.current_joint = round_array(array_r2d(6, self.rtde_r.getActualQ()), 2)
-            self.current_tcp = round_array(m2mm(rv2rpy(self.rtde_r.getActualTCPPose())), 2)
+            self.current_joint = pu.round_array(pu.array_r2d(6, self.rtde_r.getActualQ()), 2)
+            self.current_tcp = pu.round_array(pu.m2mm(pu.rv2rpy(self.rtde_r.getActualTCPPose())), 2)
 
             digital_inputs = self.rtde_r.getActualDigitalInputBits()
             digital_outputs = self.rtde_r.getActualDigitalOutputBits()
@@ -359,14 +291,14 @@ class AsyncHandler:
                 rtde_handler.rtde_c.stopJ(math.pi / 2, asynchronous=False)
 
             if self.local_ur10e.move_type == 0:  # MoveL
-                target_tcp = mm2m(rpy2rv(self.local_ur10e.target_tcp))
+                target_tcp = pu.mm2m(pu.rpy2rv(self.local_ur10e.target_tcp))
                 self.rtde_handler.rtde_c.moveL(target_tcp, self.local_ur10e.linear_speed, self.local_ur10e.linear_accel,
                                                asynchronous=True)  # True for non-blocking
 
             elif self.local_ur10e.move_type == 1:  # MoveJ
-                target_joint = array_d2r(6, self.local_ur10e.target_joint)
-                self.rtde_handler.rtde_c.moveJ(target_joint, d2r(self.local_ur10e.joint_speed),
-                                               d2r(self.local_ur10e.joint_accel),
+                target_joint = pu.array_d2r(6, self.local_ur10e.target_joint)
+                self.rtde_handler.rtde_c.moveJ(target_joint, pu.d2r(self.local_ur10e.joint_speed),
+                                               pu.d2r(self.local_ur10e.joint_accel),
                                                asynchronous=True)  # True for async (non-blocking)
             else:
                 print("Invalid move type!")

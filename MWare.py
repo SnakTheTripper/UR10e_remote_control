@@ -5,13 +5,13 @@ import time
 
 import zmq.asyncio
 import config
-import config_utils
+import project_utils as pu
 from asyncio.windows_events import WindowsSelectorEventLoopPolicy
 
 asyncio.set_event_loop_policy(WindowsSelectorEventLoopPolicy())
 
 # Set then check Update frequency for Flask and OPCUA
-freq_dict = config_utils.get_frequencies()
+freq_dict = pu.get_frequencies()
 flask_per = freq_dict['flask_per']
 opcua_per = freq_dict['opcua_per']
 
@@ -151,7 +151,7 @@ class FlaskHandler:
         self.local_ur10e = local_ur
 
         self.standby_period = 1             # for frequency of 1 Hz
-        self.flask_period = flask_per       # by default coming from config_utils.py
+        self.flask_period = flask_per       # by default coming from project_utils.py
         # period between checking if standby or rtde period should be used in sending current states to Flask
         self.calculate_flask_frequency_period = 0.1
 

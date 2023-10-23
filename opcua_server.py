@@ -4,21 +4,20 @@ import sys
 import zmq.asyncio
 
 # from asyncua import ua, Server
-from opcua import ua, Server
+from opcua import Server
 
 # data transfer
 import zmq
 import json
 
-import MWare
 # locals
 import config
-import config_utils
+import project_utils as pu
 import ur10e_object
 from datetime import datetime
 
 # Set then check Update frequency for OPCUA
-freq_dict = config_utils.get_frequencies()
+freq_dict = pu.get_frequencies()
 opcua_per = freq_dict['opcua_per']
 
 prev_time = datetime.now()
