@@ -20,6 +20,15 @@
             border: 1px solid #000;
             padding: 8px;
         }
+        .io-row {
+            width: 700px;
+            display: grid;
+            grid-template-columns: 5fr 8fr 8fr 2fr; /* Adjust these fractions based on your needs */
+            grid-gap: 4px; /* Space between each cell */
+            text-align: center;
+            border: 1px solid #000;
+            padding: 8px;
+        }
         .parameter_row {
             width: 700px;
             display: grid;
@@ -55,7 +64,6 @@
             padding: 8px;
         }
         .waypoint-table-row {
-            width: 700px;
             display: grid;
             grid-template-columns: 1fr 2fr 1fr 1fr; /* Adjust these fractions based on your needs */
             grid-gap: 16px; /* Space between each cell */
@@ -67,8 +75,6 @@
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script>
-        let control_mode = 0
-
         var program_list = []                      // kept updated
         const configData = {{ config_data | tojson | safe }};
         console.log('configData from config.py:')
@@ -82,7 +88,26 @@
         const homePositionTCP = configData.home_position_tcp
         // console.log(homePosition)
 
-        socket = io.connect('http://' + configData.ip_address_flask + ':' + configData.port_flask)
+        let standard_input_bits = []
+        let configurable_input_bits = []
+        let tool_input_bits = []
+        let standard_output_bits = []
+        let configurable_output_bits = []
+        let tool_output_bits = []
+
+        let target_standard_output_bits = []
+        let target_configurable_output_bits = []
+        let target_tool_output_bits = []
+
+        var socket = io.connect('http://' + configData.ip_address_flask + ':' + configData.port_flask)
+
+        function arraysEqual(a, b) {
+            if (a.length !== b.length) return false;
+            for (let i = 0; i < a.length; i++) {
+                if (a[i] !== b[i]) return false;
+            }
+            return true;
+        }
 
         function updateTable(program_list) {
             let tableBody = document.getElementById('waypointTable').getElementsByTagName('tbody')[0];
@@ -127,8 +152,8 @@
         function updateCurrentPosition(joint, position) {
             const slider = document.getElementById(`current_tcp_${joint}`);
             slider.value = position;
-            document.getElementById(`current_tcp_box_${joint}`).innerText = position.toFixed(2);
             updateValue(slider, `current_tcp_${joint}`);
+            document.getElementById(`current_tcp_box_${joint}`).innerText = position.toFixed(2);
         }
         function setSliderLimits() {
             for (let i = 0; i < 6; i++) {
@@ -169,6 +194,33 @@
             slider.value = parseFloat(slider.value) - 1;  // adjust step size here
             updateValue(slider, 'target_tcp_box_' + id.split('_')[2]);
         }
+        function sendOutputBits() {
+            for (let i = 0 ; i < 8 ; i++) {
+                const target_standard_output_bits_checkbox = document.getElementById(`target_standard_output_bit_${i}`)
+                const target_configurable_output_bits_checkbox = document.getElementById(`target_configurable_output_bit_${i}`)
+                target_standard_output_bits[i] = target_standard_output_bits_checkbox.checked ? 1 : 0
+                target_configurable_output_bits[i] = target_configurable_output_bits_checkbox.checked ? 1 : 0
+            }
+            for (let i = 0 ; i < 2 ; i++) {
+                const target_tool_output_bits_checkbox = document.getElementById(`target_tool_output_bit_${i}`)
+                target_tool_output_bits[i] = target_tool_output_bits_checkbox.checked ? 1 : 0
+                }
+            socket.emit('button_press', {
+                    action: 'send_output_bits',
+                    target_standard_output_bits: target_standard_output_bits,
+                    target_configurable_output_bits: target_configurable_output_bits,
+                    target_tool_output_bits: target_tool_output_bits
+            })
+            console.log(target_standard_output_bits)
+            console.log(target_configurable_output_bits)
+            console.log(target_tool_output_bits)
+        }
+        function toggleIOControl() {
+            const ioControlDiv = document.getElementById("ioControl");
+            const ioSendButton = document.getElementById("send_output_bits_button");
+            ioControlDiv.style.display = ioControlDiv.style.display === "none" ? "block" : "none";
+            ioSendButton.style.display = ioSendButton.style.display === "none" ? "block" : "none";
+        }
         function handleSend() {
             const tcp_p = [];
             for (let i = 0; i < 6; i++) {
@@ -182,8 +234,6 @@
             target_tcp_positions: tcp_p,
             linear_speed: tcp_s,
             linear_accel: tcp_a})
-
-            console.log('target_tcp SENT: ' + tcp_p)
         }
         function randomizeTCPValues() {
             // Generate random values between limits for each tcp value (xyz and rxryrz)
@@ -209,8 +259,6 @@
             target_tcp_positions: homePositionTCP,
             joint_speed: 10,
             joint_accel: 10})
-
-            console.log('TCP home positions are: ' + homePositionTCP)
 
             for (let i = 0; i < 6; i++) {
                 const tcpSlider = document.getElementById(`target_tcp_${i}`);
@@ -277,9 +325,11 @@
 
         // Initializes target_position sliders with current_position values for aesthetics (target = current)
         socket.on('page_init_values', function (data) {
+
             // itialize control mode switcher button
             control_mode = data.control_mode
             const switchControlButton = document.getElementById('switchControlButton')
+
             if (control_mode === 0) {
                 button_text = 'Switch Control to OPCUA';
             }else if (control_mode === 1) {
@@ -287,19 +337,24 @@
             }
             switchControlButton.innerText = button_text;
 
+            // update current slider positions
             let current_tcp_pos = data.current_tcp_positions
             let current_tcp_s = data.current_tcp_speed
             let current_tcp_a = data.current_tcp_accel
             program_list = data.program_list
 
-            for (let i = 0; i < 6; i++) {       // x y z - m2mm
+            console.log(current_tcp_pos)
+
+            for (let i = 0; i < 6; i++) {
+                const currentTcpSlider = document.getElementById(`current_tcp_${i}`);
                 const tcpSlider = document.getElementById(`target_tcp_${i}`);
                 tcpSlider.value = current_tcp_pos[i];
-                updateValue(tcpSlider, `target_tcp_${i}`);
+                currentTcpSlider.value = current_tcp_pos[i];
+                updateValue(tcpSlider, `current_tcp_box_${i}`);
                 updateValue(tcpSlider, `target_tcp_box_${i}`);
             }
 
-            // update speed and accel sliders too
+            // initialize speed and accel sliders too
             const speedSlider = document.getElementById('tcp_speed')
             const accelSlider = document.getElementById('tcp_accel')
             updateValue(speedSlider, 'tcp_speed_box')
@@ -310,7 +365,46 @@
             updateValue(speedSlider, 'tcp_speed_box')
             updateValue(accelSlider, 'tcp_accel_box')
 
+            // initialize program list
             updateTable(program_list)
+
+            // initialize IO table
+            let initial_standard_input_bits = data.standard_input_bits
+            let initial_configurable_input_bits = data.configurable_input_bits
+            let initial_tool_input_bits = data.tool_input_bits
+
+            // these variables have been declared in global scope
+            target_standard_output_bits = data.standard_output_bits
+            target_configurable_output_bits = data.configurable_output_bits
+            target_tool_output_bits = data.tool_output_bits
+
+            for (let i = 0 ; i < 8 ; i++) {
+                const target_standard_output_bits_checkbox = document.getElementById(`target_standard_output_bit_${i}`)
+                const target_configurable_output_bits_checkbox = document.getElementById(`target_configurable_output_bit_${i}`)
+                target_standard_output_bits_checkbox.checked = (target_standard_output_bits[i] === 1);
+                target_configurable_output_bits_checkbox.checked = (target_configurable_output_bits[i] === 1);
+
+                const standard_output_bits = document.getElementById(`standard_output_bit_${i}`)
+                const configurable_output_bits = document.getElementById(`configurable_output_bit_${i}`)
+                standard_output_bits.innerText = target_standard_output_bits[i]
+                configurable_output_bits.innerText = target_configurable_output_bits[i]
+
+                const standard_input_bits = document.getElementById(`standard_input_bit_${i}`)
+                const configurable_input_bits = document.getElementById(`configurable_input_bit_${i}`)
+                standard_input_bits.innerText = initial_standard_input_bits[i]
+                configurable_input_bits.innerText = initial_configurable_input_bits[i]
+            }
+            for (let i = 0 ; i < 2 ; i++) {
+                const target_tool_output_bits_checkbox = document.getElementById(`target_tool_output_bit_${i}`)
+                target_tool_output_bits_checkbox.checked = (target_tool_output_bits[i] === 1);
+
+                const tool_output_bits = document.getElementById(`tool_output_bit_${i}`)
+                tool_output_bits.innerText = target_tool_output_bits[i]
+
+                const tool_input_bits = document.getElementById(`tool_input_bit_${i}`)
+                tool_input_bits.innerText = initial_tool_input_bits[i]
+
+            }
         });
 
         socket.on('updateTable', function(data) {
@@ -356,33 +450,73 @@
                 setTimeout(reconnectSocket, 3000);
             });
         }
-        socket.on('update_current', function(data) {
-            const positions = data.tcp_positions;
+        socket.on('update_current_positions', function(data) {
+            const positions = data.current_tcp;
             // console.log(positions);
             for (let i = 0; i < 6; i++) {
                 updateCurrentPosition(i, positions[i]);
             }
-
-            const standard_input_bits = data.standard_input_bits;
-            const configurable_input_bits = data.configurable_input_bits;
-            const tool_input_bits = data.tool_input_bits;
-            const standard_output_bits = data.standard_output_bits;
-            const configurable_output_bits = data.configurable_output_bits;
-            const tool_output_bits = data.tool_output_bits;
-
-            for (let i = 0; i < 8; i++) {
-                // update all except tool bit displays (i and o)
-                // document.getElementById()
-                // .setValue or whatever
-                // update
-            }
-            for (let i = 0; i < 2; i++) {
-                // update tool i and o bit displays
-            }
         });
+        socket.on('update_current_IO', function (data) {
+            old_standard_input_bits = standard_input_bits
+            old_configurable_input_bits = configurable_input_bits
+            old_tool_input_bits = tool_input_bits
+            old_standard_output_bits = standard_output_bits
+            old_configurable_output_bits = configurable_output_bits
+            old_tool_output_bits = tool_output_bits
 
+            standard_input_bits = data.standard_input_bits;
+            configurable_input_bits = data.configurable_input_bits;
+            tool_input_bits = data.tool_input_bits;
+            standard_output_bits = data.standard_output_bits;
+            configurable_output_bits = data.configurable_output_bits;
+            tool_output_bits = data.tool_output_bits;
 
-        // allows current position flow for a second for initialization
+            if (
+                !arraysEqual(old_standard_input_bits, standard_input_bits) ||
+                !arraysEqual(old_configurable_input_bits, configurable_input_bits) ||
+                !arraysEqual(old_tool_input_bits, tool_input_bits) ||
+                !arraysEqual(old_standard_output_bits, standard_output_bits) ||
+                !arraysEqual(old_configurable_output_bits, configurable_output_bits) ||
+                !arraysEqual(old_tool_output_bits, tool_output_bits)
+            ) {
+                for (let i = 0; i < 8; i++) {
+                    // update standard and configurable I/O indicators
+                    const standard_input_bit_indicator = document.getElementById(`standard_input_bit_${i}`)
+                    const configurable_input_bit_indicator = document.getElementById(`configurable_input_bit_${i}`)
+                    const standard_output_bit_indicator = document.getElementById(`standard_output_bit_${i}`)
+                    const configurable_output_bit_indicator = document.getElementById(`configurable_output_bit_${i}`)
+                    standard_input_bit_indicator.innerText = standard_input_bits[i]
+                    configurable_input_bit_indicator.innerText = configurable_input_bits[i]
+                    standard_output_bit_indicator.innerText = standard_output_bits[i]
+                    configurable_output_bit_indicator.innerText = configurable_output_bits[i]
+                }
+                for (let i = 0; i < 2; i++) {
+                    // update tool I/O bit indicators
+                    const tool_input_bit_indicator = document.getElementById(`tool_input_bit_${i}`)
+                    const tool_output_bit_indicator = document.getElementById(`tool_output_bit_${i}`)
+                    tool_input_bit_indicator.innerText = tool_input_bits[i]
+                    tool_output_bit_indicator.innerText = tool_output_bits[i]
+                }
+            }
+        })
+        socket.on('update_target_IO', function (data) {
+            target_standard_output_bits = data.target_standard_output_bits;
+            target_configurable_output_bits = data.target_configurable_output_bits;
+            target_tool_output_bits = data.target_tool_output_bits;
+
+            for (let i = 0 ; i < 8 ; i++) {
+                const target_standard_output_bits_checkbox = document.getElementById(`target_standard_output_bit_${i}`)
+                const target_configurable_output_bits_checkbox = document.getElementById(`target_configurable_output_bit_${i}`)
+                target_standard_output_bits_checkbox.checked = (target_standard_output_bits[i] === 1);
+                target_configurable_output_bits_checkbox.checked = (target_configurable_output_bits[i] === 1);
+            }
+            for (let i = 0 ; i < 2 ; i++) {
+                const target_tool_output_bits_checkbox = document.getElementById(`target_tool_output_bit_${i}`)
+                target_tool_output_bits_checkbox.checked = (target_tool_output_bits[i] === 1);
+
+            }
+        })
 
         window.onload = function () {
             setSliderLimits()
@@ -452,7 +586,134 @@
                     </div>
                 <td><span id="tcp_accel_box">0.00</span></td>
             </tr>
-        </table><br>
+        </table>
+        <div style="display: flex; justify-content: flex-end">
+            <button id="send_output_bits_button" type="button" onclick="sendOutputBits()">Send Output Bits</button>
+            <button type="button" onclick="toggleIOControl()">Toggle I/O Control</button>
+        </div>
+        <div id="ioControl" style="block">
+            <table class="io_table">
+                <thead>
+                    <tr class="io-row">
+                        <td></td>
+                        <th>Standard</th>
+                        <th>Configurable</th>
+                        <th>Tool</th>
+                    </tr>
+                    <tr class="io-row" >
+                        <th>I/O Bit ID</th>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div>0</div>
+                            <div>1</div>
+                            <div>2</div>
+                            <div>3</div>
+                            <div>4</div>
+                            <div>5</div>
+                            <div>6</div>
+                            <div>7</div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div>0</div>
+                            <div>1</div>
+                            <div>2</div>
+                            <div>3</div>
+                            <div>4</div>
+                            <div>5</div>
+                            <div>6</div>
+                            <div>7</div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr">
+                            <div>0</div>
+                            <div>1</div>
+                        </td>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="io-row" id="input_bits_row">
+                        <td>Input Bits</td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div><span id="standard_input_bit_0">0</span></div>
+                            <div><span id="standard_input_bit_1">0</span></div>
+                            <div><span id="standard_input_bit_2">0</span></div>
+                            <div><span id="standard_input_bit_3">0</span></div>
+                            <div><span id="standard_input_bit_4">0</span></div>
+                            <div><span id="standard_input_bit_5">0</span></div>
+                            <div><span id="standard_input_bit_6">0</span></div>
+                            <div><span id="standard_input_bit_7">0</span></div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div><span id="configurable_input_bit_0">0</span></div>
+                            <div><span id="configurable_input_bit_1">0</span></div>
+                            <div><span id="configurable_input_bit_2">0</span></div>
+                            <div><span id="configurable_input_bit_3">0</span></div>
+                            <div><span id="configurable_input_bit_4">0</span></div>
+                            <div><span id="configurable_input_bit_5">0</span></div>
+                            <div><span id="configurable_input_bit_6">0</span></div>
+                            <div><span id="configurable_input_bit_7">0</span></div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr">
+                            <div><span id="tool_input_bit_0">0</span></div>
+                            <div><span id="tool_input_bit_1">0</span></div>
+                        </td>
+                    </tr>
+                    <tr class="io-row" id="output_bits_row">
+                        <td>Output Bits</td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div><span id="standard_output_bit_0">0</span></div>
+                            <div><span id="standard_output_bit_1">0</span></div>
+                            <div><span id="standard_output_bit_2">0</span></div>
+                            <div><span id="standard_output_bit_3">0</span></div>
+                            <div><span id="standard_output_bit_4">0</span></div>
+                            <div><span id="standard_output_bit_5">0</span></div>
+                            <div><span id="standard_output_bit_6">0</span></div>
+                            <div><span id="standard_output_bit_7">0</span></div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div><span id="configurable_output_bit_0">0</span></div>
+                            <div><span id="configurable_output_bit_1">0</span></div>
+                            <div><span id="configurable_output_bit_2">0</span></div>
+                            <div><span id="configurable_output_bit_3">0</span></div>
+                            <div><span id="configurable_output_bit_4">0</span></div>
+                            <div><span id="configurable_output_bit_5">0</span></div>
+                            <div><span id="configurable_output_bit_6">0</span></div>
+                            <div><span id="configurable_output_bit_7">0</span></div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr">
+                            <div><span id="tool_output_bit_0">0</span></div>
+                            <div><span id="tool_output_bit_1">0</span></div>
+                        </td>
+                    </tr>
+                    <tr class="io-row" id="target_output_bits_row">
+                        <td>Target Output Bits</td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div><input type="checkbox" id="target_standard_output_bit_0"></div>
+                            <div><input type="checkbox" id="target_standard_output_bit_1"></div>
+                            <div><input type="checkbox" id="target_standard_output_bit_2"></div>
+                            <div><input type="checkbox" id="target_standard_output_bit_3"></div>
+                            <div><input type="checkbox" id="target_standard_output_bit_4"></div>
+                            <div><input type="checkbox" id="target_standard_output_bit_5"></div>
+                            <div><input type="checkbox" id="target_standard_output_bit_6"></div>
+                            <div><input type="checkbox" id="target_standard_output_bit_7"></div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div><input type="checkbox" id="target_configurable_output_bit_0"></div>
+                            <div><input type="checkbox" id="target_configurable_output_bit_1"></div>
+                            <div><input type="checkbox" id="target_configurable_output_bit_2"></div>
+                            <div><input type="checkbox" id="target_configurable_output_bit_3"></div>
+                            <div><input type="checkbox" id="target_configurable_output_bit_4"></div>
+                            <div><input type="checkbox" id="target_configurable_output_bit_5"></div>
+                            <div><input type="checkbox" id="target_configurable_output_bit_6"></div>
+                            <div><input type="checkbox" id="target_configurable_output_bit_7"></div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr">
+                            <div><input type="checkbox" id="target_tool_output_bit_0"></div>
+                            <div><input type="checkbox" id="target_tool_output_bit_1"></div>
+                        </td>
+                    </tr>
+                </tbody>
+              </table>
+        </div>
+        <br>
         <div class="center-container">
             <button type="button" onclick="randomizeTCPValues()">Randomize TCP Values</button>
             <button type="button" onclick="sendHome()">Send Home</button>
@@ -474,7 +735,7 @@
         </div>
 
         <br>
-        <div class="table-container-center">
+        <div class="center-container">
             <table id="waypointTable">
                 <thead>
                     <tr class="waypoint-table-header">
