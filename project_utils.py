@@ -5,13 +5,13 @@ from scipy.spatial.transform import Rotation as R
 
 
 def get_frequencies():
-    rtde_frequency = config.rtde_frequency
+    rtde_frequency = config.RTDE_FREQ
     rtde_period = 1 / rtde_frequency  # 0.002s for 500Hz
 
-    flask_frequency = config.flask_frequency
+    flask_frequency = config.FLASK_FREQ
     flask_period = 1 / flask_frequency
 
-    opcua_frequency = config.opcua_frequency
+    opcua_frequency = config.OPCUA_FREQ
     opcua_period = 1 / opcua_frequency
 
     if rtde_frequency > 500:

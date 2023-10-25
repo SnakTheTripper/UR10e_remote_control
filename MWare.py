@@ -6,8 +6,9 @@ import time
 import zmq.asyncio
 import config
 import project_utils as pu
-from asyncio.windows_events import WindowsSelectorEventLoopPolicy
 
+# disable when running on Linux based systems
+from asyncio.windows_events import WindowsSelectorEventLoopPolicy
 asyncio.set_event_loop_policy(WindowsSelectorEventLoopPolicy())
 
 # Set then check Update frequency for Flask and OPCUA
@@ -24,29 +25,29 @@ def initialize_zmq_connections(context):
     to_opcua_socket = context.socket(zmq.PUB)
     from_opcua_socket = context.socket(zmq.SUB)
     try:  # com with UR10e_bridge
-        to_bridge_socket.connect(f"tcp://{config.ip_address_bridge}:{config.port_mw_b}")
-        from_bridge_socket.connect(f"tcp://{config.ip_address_bridge}:{config.port_b_mw}")
+        to_bridge_socket.connect(f"tcp://{config.IP_BRIDGE}:{config.PORT_MW_B}")
+        from_bridge_socket.connect(f"tcp://{config.IP_BRIDGE}:{config.PORT_B_MW}")
         print('\033[32mUR10e Bridge ports bound!\033[0m')
     except Exception as e:
         sys.exit(f"\033[91mCan't connect to UR10e Bridge! {e}\033[0m")
 
     try:  # com with Flask Server
-        to_flask_socket.bind(f"tcp://{config.ip_address_MW}:{config.port_mw_f}")
-        from_flask_socket.bind(f"tcp://{config.ip_address_MW}:{config.port_f_mw}")
+        to_flask_socket.bind(f"tcp://{config.IP_MWARE}:{config.PORT_MW_F}")
+        from_flask_socket.bind(f"tcp://{config.IP_MWARE}:{config.PORT_F_MW}")
         print('\033[32mFlask Server ports bound!\033[0m')
     except Exception as e:
         sys.exit(f"\033[91mCan't connect to Flask Server! {e}\033[0m")
 
     try:  # com with OPCUA Server
-        to_opcua_socket.bind(f"tcp://{config.ip_address_MW}:{config.port_mw_op}")
-        from_opcua_socket.bind(f"tcp://{config.ip_address_MW}:{config.port_op_mw}")
+        to_opcua_socket.bind(f"tcp://{config.IP_MWARE}:{config.PORT_MW_OP}")
+        from_opcua_socket.bind(f"tcp://{config.IP_MWARE}:{config.PORT_OP_MW}")
         print('\033[32mOPCUA Server ports bound!\033[0m')
     except Exception as e:
         sys.exit(f"\033[91mCan't connect to OPCUA Server! {e}\033[0m")
 
     print(
-        f'Publish on port: {config.port_mw_f} & {config.port_mw_b} & {config.port_op_mw}\n'
-        f'Listening on port: {config.port_f_mw} & {config.port_b_mw} & {config.port_mw_op}')
+        f'Publish on port: {config.PORT_MW_F} & {config.PORT_MW_B} & {config.PORT_OP_MW}\n'
+        f'Listening on port: {config.PORT_F_MW} & {config.PORT_B_MW} & {config.PORT_MW_OP}')
 
     return to_opcua_socket, to_bridge_socket, to_flask_socket, from_bridge_socket, from_opcua_socket, from_flask_socket
 
@@ -60,7 +61,7 @@ class UR10e:
         self.target_tcp = [0.0] * 6
 
         self.move_type = 1  # 0 = linear 1 = joint (represents last used move_type)
-        self.control_mode = config.default_control_mode  # 0 = flask  1 = opcua
+        self.control_mode = config.DEFAULT_MODE  # 0 = flask  1 = opcua
 
         self.joint_speed = 10
         self.joint_accel = 10

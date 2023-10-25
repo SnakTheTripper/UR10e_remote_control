@@ -2,19 +2,28 @@ import json
 import sys
 import threading
 import time
+
 import zmq
 from flask import Flask, render_template, redirect
 from flask_socketio import SocketIO
-from datetime import datetime, timedelta
 import config
 import project_utils as pu
+from waitress import serve
 
 # Set then check Update frequency for Flask
 freq_dict = pu.get_frequencies()
 flask_per = freq_dict['flask_per']
 
-app = Flask(__name__)
-socket = SocketIO(app)
+
+def gather_config_data_for_JavaScript():
+    return {'ip_address_flask': config.IP_FLASK_LOCAL,
+            'port_flask': config.PORT_FLASK,
+            'joint_limits_lower': config.joint_limits_lower,
+            'joint_limits_upper': config.joint_limits_upper,
+            'tcp_limits_lower': config.tcp_limits_lower,
+            'tcp_limits_upper': config.tcp_limits_upper,
+            'home_position_joint': config.robot_home_position_joint,
+            'home_position_tcp': config.robot_home_position_tcp}
 
 
 class UR10e:
@@ -27,7 +36,7 @@ class UR10e:
 
         # represents last used move_type
         self.move_type = 1  # 0 = linear 1 = joint
-        self.control_mode = config.default_control_mode  # 0 = flask  1 = opcua
+        self.control_mode = config.DEFAULT_MODE  # 0 = flask  1 = opcua
         self.joint_speed = 10
         self.joint_accel = 10
         self.linear_speed = 0.1
@@ -81,6 +90,139 @@ class UR10e:
         self.target_tcp = self.current_tcp
         self.target_joint = self.current_joint
 
+
+class MiddleWare:
+    def __init__(self):
+        self.socket = socket
+        context = zmq.Context()
+
+        self.pub_socket = context.socket(zmq.PUB)
+        self.sub_socket = context.socket(zmq.SUB)
+
+        self.topic = None
+        self.received_message = None
+
+        self.web = WebMethods(self.socket)
+
+        self.connect_to_mw()
+
+    def connect_to_mw(self):
+        # Connect to MW
+        try:
+            self.pub_socket.connect(f"tcp://{config.IP_FLASK_LOCAL}:{config.PORT_F_MW}")
+            self.sub_socket.connect(f"tcp://{config.IP_MWARE}:{config.PORT_MW_F}")
+
+            self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"Joint_States")
+            self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"switchControl")
+        except Exception as e:
+            sys.exit(f"Error with ports {config.PORT_F_MW} & {config.PORT_MW_F}: {e}")
+
+    def receive_from_mw(self):  # on web client
+        while True:
+            try:
+                [self.topic, self.received_message] = self.sub_socket.recv_multipart()
+            except Exception as e:
+                print(f"Error in receiving the actual joint positions!: {e}")
+
+            if self.topic == b"Joint_States":
+                decoded_message = json.loads(self.received_message.decode())
+                local_ur10e.update_local_dataset(decoded_message)
+
+            elif self.topic == b"switchControl":
+                local_ur10e.control_mode = json.loads(self.received_message.decode())
+                print(f'local control_mode set by OPCUA to {local_ur10e.control_mode}')
+                self.socket.emit('update_control_mode', {'control_mode': local_ur10e.control_mode})
+
+            if local_ur10e.control_mode == 0:  # flask
+                # update current, target is defined by web client
+                self.web.update_current_positions()
+                self.web.update_current_IO()
+
+            elif local_ur10e.control_mode == 1:  # opcua
+                # update current (from bridge) AND target (from opcua)
+                self.web.update_current_positions()
+                self.web.update_target_positions()
+                self.web.update_current_IO()
+                self.web.update_target_IO()
+
+
+class FlaskServer:
+    def __init__(self):
+        self.app = Flask(__name__)
+        self.app_routes()
+
+    def get_app(self):
+        return self.app
+
+    def app_routes(self):
+        @self.app.route('/')
+        def index():
+            return redirect('/home')
+
+        @self.app.route('/home')
+        def home():
+            return render_template('home.html')
+
+        @self.app.route('/joint_control')
+        def JOINT_control_page():
+            print("JOINT CONTROL PAGE OPENED - Move Type set")
+            local_ur10e.move_type = 1  # moveJ
+            config_data = gather_config_data_for_JavaScript()
+            return render_template('JOINT_control.html', config_data=config_data)
+
+        @self.app.route('/tcp_control')
+        def TCP_control_page():
+            print("TCP CONTROL PAGE OPENED - Move Type set")
+            local_ur10e.move_type = 0  # moveL
+            config_data = gather_config_data_for_JavaScript()
+
+            return render_template('TCP_control.html', config_data=config_data)
+
+
+class SocketIOEvents:
+    def __init__(self, sck):
+        self.socket = sck
+        self.web = WebMethods(self.socket)
+        self.buttons = Buttons(self.socket)
+
+        self.register_events()
+
+    def register_events(self):
+        @self.socket.on('button_press')
+        def handle_buttons(command_data):
+            action = command_data["action"]
+            if action == "send":
+                self.buttons.sendButton(command_data)
+            elif action == "stop":
+                self.buttons.stopButton()
+            elif action == "send_output_bits":
+                self.buttons.send_output_bits(command_data)
+            elif action == "addToList":
+                self.buttons.addToList(command_data)
+            elif action == "deleteFromList":  # just deletes the last waypoint
+                self.buttons.deleteFromList(
+                    idToDelete=len(local_ur10e.program_list) - 1)  # Deletes Last item. You can add idToDelete Later
+            elif action == "clearList":
+                self.buttons.clearList()
+            elif action == "runProgram":
+                self.buttons.runProgram()
+            elif action == "switchControl":
+                self.buttons.switchControl()
+
+            # update program list with every button press
+            self.socket.emit('updateTable', {'program_list': local_ur10e.program_list})
+
+        @self.socket.on('page_init')
+        def page_init():  # start current_position flow after page load for initialization
+            # Send page initialization values
+            self.web.send_page_initialization_values()
+
+        @self.socket.on('keep_alive')
+        def handle_keep_alive(message):
+            # print(message["data"])
+            self.socket.emit('keep_alive', {'message': 'Server is alive too'})
+
+
 class WebMethods:
     def __init__(self, socketio):
         self.socket = socketio
@@ -132,6 +274,7 @@ class WebMethods:
                                               'configurable_output_bits': local_ur10e.configurable_output_bits,
                                               'tool_output_bits': local_ur10e.tool_output_bits})
 
+
 class Buttons:
     def __init__(self, socketio):
         self.socket = socketio
@@ -139,35 +282,10 @@ class Buttons:
 
         self.global_stop_flag = False
 
-    def button_listener(self):
-        @socket.on('button_press')
-        def handle_buttons(command_data):
-            action = command_data["action"]
-            if action == "send":
-                self.sendButton(command_data)
-            elif action == "stop":
-                self.stopButton()
-            elif action == "send_output_bits":
-                self.send_output_bits(command_data)
-            elif action == "addToList":
-                self.addToList(command_data)
-            elif action == "deleteFromList":  # just deletes the last waypoint
-                self.deleteFromList(
-                    idToDelete=len(local_ur10e.program_list) - 1)  # Deletes Last item. You can add idToDelete Later
-            elif action == "clearList":
-                self.clearList()
-            elif action == "runProgram":
-                self.runProgram()
-            elif action == "switchControl":
-                self.switchControl()
-
-            # update program list with every button press
-            self.socket.emit('updateTable', {'program_list': local_ur10e.program_list})
-
     def send_movement(self):
         message = local_ur10e.gather_to_send_command_values()  # gathers and sends relevant data from central_data to MW
         serialized_message = json.dumps(message).encode()
-        pub_socket.send_multipart([b"Move_Command", serialized_message])
+        mw_handler.pub_socket.send_multipart([b"Move_Command", serialized_message])
         # send package to web clients, so it updates other clients too
         self.web.update_target_positions()
 
@@ -180,7 +298,7 @@ class Buttons:
         # send newly updated targets to MW
         message = local_ur10e.gather_to_send_output_bits()
         serialized_message = json.dumps(message).encode()
-        pub_socket.send_multipart([b"output_bit_command", serialized_message])
+        mw_handler.pub_socket.send_multipart([b"output_bit_command", serialized_message])
         # send package to web clients, so it updates other clients too
         self.web.update_target_IO()
 
@@ -210,23 +328,19 @@ class Buttons:
             print('Control Mode is set to Unknown! Check value of control_mode in Flask_server.py')
 
     def stopButton(self):
-        if local_ur10e.is_moving:  # only send if moving
-            local_ur10e.STOP = 1  # will be reset by reply from robot
-            socket.emit('STOP_button')  # for alert on webpage
-            self.send_movement()  # send STOP signal
+        local_ur10e.STOP = 1  # will be reset by reply from robot
+        socket.emit('STOP_button')  # for alert on webpage
+        self.send_movement()  # send STOP signal
 
-            # robot will send reset_STOP_flag after coming to a complete stop
+        # robot will send reset_STOP_flag after coming to a complete stop
 
-            while local_ur10e.reset_STOP_flag == 0:
-                print('debug: Waiting for resset_STOP_flag to turn to 1')
-                time.sleep(flask_per)  # wait until reset_STOP_flag comes from robot
+        while local_ur10e.reset_STOP_flag == 0:
+            print('debug: Waiting for resset_STOP_flag to turn to 1')
+            time.sleep(flask_per)  # wait until reset_STOP_flag comes from robot
 
-            print('debug: reset_STOP_flag turned to 1! DONE! Resetting STOP to 0')
-            local_ur10e.STOP = 0
-            self.send_movement()
-
-        else:
-            print('Robot not moving, Stop not sent')
+        print('debug: reset_STOP_flag turned to 1! DONE! Resetting STOP to 0')
+        local_ur10e.STOP = 0
+        self.send_movement()
 
         # raise global stop flag for runProgram function to see (if program is running)
 
@@ -279,6 +393,7 @@ class Buttons:
                     print(f"Doing move nr. {i + 1}")
 
                     time.sleep(1)
+
                     while local_ur10e.is_moving:
                         if self.global_stop_flag:
                             break
@@ -287,7 +402,6 @@ class Buttons:
                     time.sleep(1)  # between waypoints
 
                     if self.global_stop_flag:
-                        self.global_stop_flag = False
                         break
 
                     i += 1
@@ -317,121 +431,34 @@ class Buttons:
 
         print(f'New control_mode: {new_control_mode}')
         local_ur10e.control_mode = new_control_mode
-        pub_socket.send_multipart([topic, json.dumps(new_control_mode).encode()])
+        mw_handler.pub_socket.send_multipart([topic, json.dumps(new_control_mode).encode()])
 
         self.socket.emit('update_control_mode', {'control_mode': local_ur10e.control_mode})
 
 
-def zmq_connect_to_mw(pub_sock, sub_sock):
-    # Connect to MW
-    try:
-        pub_sock.connect(f"tcp://{config.ip_address_flask_server}:{config.port_f_mw}")
-        sub_sock.connect(f"tcp://{config.ip_address_MW}:{config.port_mw_f}")
-
-        sub_sock.setsockopt(zmq.SUBSCRIBE, b"Joint_States")
-        sub_sock.setsockopt(zmq.SUBSCRIBE, b"switchControl")
-    except Exception as e:
-        sys.exit(f"Error with ports {config.port_f_mw} & {config.port_mw_f}: {e}")
-
-
-def gather_config_data_for_JavaScript():
-    return {'ip_address_flask': config.ip_address_flask_server,
-            'port_flask': config.port_flask,
-            'joint_limits_lower': config.joint_limits_lower,
-            'joint_limits_upper': config.joint_limits_upper,
-            'tcp_limits_lower': config.tcp_limits_lower,
-            'tcp_limits_upper': config.tcp_limits_upper,
-            'home_position_joint': config.robot_home_position_joint,
-            'home_position_tcp': config.robot_home_position_tcp}
-
-
-def receive_from_mw():  # on web client
-    topic = None
-    received_message = None
-    while True:
-        try:
-            [topic, received_message] = sub_socket.recv_multipart()
-        except Exception as e:
-            print(f"Error in receiving the actual joint positions!: {e}")
-
-        if topic == b"Joint_States":
-            decoded_message = json.loads(received_message.decode())
-            local_ur10e.update_local_dataset(decoded_message)
-
-        elif topic == b"switchControl":
-            local_ur10e.control_mode = json.loads(received_message.decode())
-            print(f'local control_mode set by OPCUA to {local_ur10e.control_mode}')
-            socket.emit('update_control_mode', {'control_mode': local_ur10e.control_mode})
-
-        if local_ur10e.control_mode == 0:  # flask
-            # update current, target is defined by web client
-            web.update_current_positions()
-            web.update_current_IO()
-
-        elif local_ur10e.control_mode == 1:  # opcua
-            # update current (from bridge) AND target (from opcua)
-            web.update_current_positions()
-            web.update_target_positions()
-            web.update_current_IO()
-            web.update_target_IO()
-
-
-@app.route('/')
-def index():
-    return redirect('/home')
-
-
-@app.route('/home')
-def home():
-    return render_template('home.html')
-
-
-@app.route('/joint_control')
-def JOINT_control_page():
-    print("JOINT CONTROL PAGE OPENED - Move Type set")
-    local_ur10e.move_type = 1  # moveJ
-    config_data = gather_config_data_for_JavaScript()
-
-    return render_template('JOINT_control.html', config_data=config_data)
-
-
-@app.route('/tcp_control')
-def TCP_control_page():
-    print("TCP CONTROL PAGE OPENED - Move Type set")
-    local_ur10e.move_type = 0  # moveL
-    config_data = gather_config_data_for_JavaScript()
-
-    return render_template('TCP_control.html', config_data=config_data)
-
-
-@socket.on('page_init')
-def page_init():  # start current_position flow after page load for initialization
-    # Send page initialization values
-    web.send_page_initialization_values()
-
-@socket.on('keep_alive')
-def handle_keep_alive(message):
-    # print(message["data"])
-    socket.emit('keep_alive', {'message': 'Server is alive too'})
-
-
 if __name__ == '__main__':
-    web = WebMethods(socket)  # for updating web clients
-
     local_ur10e = UR10e()  # local robot object state
-    local_ur10e.program_list = config.starter_program
+    local_ur10e.program_list = config.STARTER_PROGRAM
 
-    context = zmq.Context()
-    pub_socket = context.socket(zmq.PUB)
-    sub_socket = context.socket(zmq.SUB)
+    app = FlaskServer().get_app()
 
-    zmq_connect_to_mw(pub_socket, sub_socket)
+    # install gevent and gevent-websocket to run in production mode
+    # web client updates are much slower when in production mode
+    # socket = SocketIO(app, async_mode='gevent')
+    socket = SocketIO(app)
 
-    buttons = Buttons(socket)
-    buttons.button_listener()  # start @socket.on button event registering
+    def run_app():
+        SocketIOEvents(socket)
+        serve(app, host=config.IP_FLASK_LOCAL, port=config.PORT_FLASK)
 
-    receiver_thread = threading.Thread(target=receive_from_mw)
+        # this is only for gevent
+        # socket.run(app, host=config.IP_FLASK_LOCAL, port=config.PORT_FLASK, debug=False,
+        #            allow_unsafe_werkzeug=True)
+
+
+    mw_handler = MiddleWare()
+    receiver_thread = threading.Thread(target=mw_handler.receive_from_mw)
     receiver_thread.start()
 
-    socket.run(app, host=config.ip_address_flask_server, port=config.port_flask, debug=True,
-               allow_unsafe_werkzeug=True)
+    flask_thread = threading.Thread(target=run_app)
+    flask_thread.start()

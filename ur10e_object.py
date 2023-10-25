@@ -53,7 +53,7 @@ def ur10e_platform_variables(idx, objects):
     control = ur10e_obj.add_object(idx, "5 UR10e Control Values")
 
     move_type = control.add_variable(idx, "move_type", 1)  # 0 - linear, 1 - joint
-    control_mode = control.add_variable(idx, "control_mode", config.default_control_mode)  # 0 - flask,  1 - opcua
+    control_mode = control.add_variable(idx, "control_mode", config.DEFAULT_MODE)  # 0 - flask,  1 - opcua
     joint_speed = control.add_variable(idx, "Joint Speed", 10)
     joint_accel = control.add_variable(idx, "Joint Acceleration", 10)
     tcp_speed = control.add_variable(idx, "TCP Speed", 0.1)

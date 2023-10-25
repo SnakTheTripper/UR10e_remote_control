@@ -37,7 +37,7 @@ async def freq_calc():
 def initialize_OPCUA_server():
     try:
         server = Server()
-        full_path = f"opc.tcp://{config.ip_address_opcua_server}:{config.port_opcua}"
+        full_path = f"opc.tcp://{config.IP_OPCUA}:{config.PORT_OPCUA}"
         server.set_endpoint(full_path)
 
         uri = 'https://UiT-remote-control-project.no'
@@ -65,8 +65,8 @@ def initialize_ZMQ_connection():
             from_mw = context.socket(zmq.SUB)
             to_mw = context.socket(zmq.PUB)
 
-            from_mw.connect(f"tcp://{config.ip_address_MW}:{config.port_mw_op}")
-            to_mw.connect(f"tcp://{config.ip_address_MW}:{config.port_op_mw}")
+            from_mw.connect(f"tcp://{config.IP_MWARE}:{config.PORT_MW_OP}")
+            to_mw.connect(f"tcp://{config.IP_MWARE}:{config.PORT_OP_MW}")
 
             from_mw.setsockopt(zmq.SUBSCRIBE, b"update_package")
             from_mw.setsockopt(zmq.SUBSCRIBE, b"switchControl")
@@ -87,7 +87,7 @@ class UR10e:
 
         # represents last used move_type
         self.move_type = 1  # 0 = linear 1 = joint
-        self.control_mode = config.default_control_mode  # 0 = flask  1 = opcua
+        self.control_mode = config.DEFAULT_MODE  # 0 = flask  1 = opcua
         self.joint_speed = 0.1
         self.joint_accel = 0.1
         self.linear_speed = 0.1

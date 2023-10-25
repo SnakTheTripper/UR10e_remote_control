@@ -1,6 +1,5 @@
 import math
 import time
-from asyncio.windows_events import WindowsSelectorEventLoopPolicy
 import asyncio
 import json
 import sys
@@ -14,7 +13,8 @@ import config
 import project_utils as pu
 
 # disable when running on Linux based systems
-asyncio.set_event_loop_policy(WindowsSelectorEventLoopPolicy())
+# from asyncio.windows_events import WindowsSelectorEventLoopPolicy
+# asyncio.set_event_loop_policy(WindowsSelectorEventLoopPolicy())
 
 # Set then check Update frequency for RTDE
 freq_dict = pu.get_frequencies()
@@ -32,11 +32,11 @@ class ZmqHandler:
         print("Binding ZMQ ports...")
         try:
             self.sub_socket = self.context.socket(zmq.SUB)
-            self.sub_socket.bind(f"tcp://{config.ip_address_bridge}:{config.port_mw_b}")
+            self.sub_socket.bind(f"tcp://{config.IP_BRIDGE}:{config.PORT_MW_B}")
             self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"Move_Command")
             self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"output_bit_command")
             self.pub_socket = self.context.socket(zmq.PUB)
-            self.pub_socket.bind(f"tcp://{config.ip_address_bridge}:{config.port_b_mw}")
+            self.pub_socket.bind(f"tcp://{config.IP_BRIDGE}:{config.PORT_B_MW}")
         except Exception as e:
             sys.exit(f"Can't bind ZMQ Ports: {e}")
         print("ZMQ Connected Successfully\n")
@@ -49,12 +49,12 @@ class RtdeHandler:
         self.rtde_r = None
         self.rtde_c = None
         self.rtde_io = None
-        self.ur_dashboard_client = dashboard_client.DashboardClient(config.ip_address_ur10, config.port_ur_dashboard)
+        self.ur_dashboard_client = dashboard_client.DashboardClient(config.IP_UR10e, config.PORT_UR_DASHBOARD)
 
     def connect_rtde_r(self):
         print("Connecting RTDE Receive Interface...")
         try:
-            self.rtde_r = rtde_receive.RTDEReceiveInterface(config.ip_address_ur10, frequency=rtde_freq, variables=[])
+            self.rtde_r = rtde_receive.RTDEReceiveInterface(config.IP_UR10e, frequency=rtde_freq, variables=[])
         except RuntimeError as e:
             print(f"Make sure the robot is powered on!\nError: {e}")
             sys.exit('Start Robot!')
@@ -69,7 +69,7 @@ class RtdeHandler:
         if self.rtde_c is None:
             print("Connecting RTDE Control Interface...")
             try:
-                self.rtde_c = rtde_control.RTDEControlInterface(config.ip_address_ur10, frequency=rtde_freq, flags=1)
+                self.rtde_c = rtde_control.RTDEControlInterface(config.IP_UR10e, frequency=rtde_freq, flags=1)
                 print("Connected to UR10e Successfully - RTDE Control\n")
             except RuntimeError as e:
                 print(f"Make sure the robot is powered on!\nError: {e}")
@@ -97,7 +97,7 @@ class RtdeHandler:
         if self.rtde_io is None:
             print("Connecting RTDE I/O Interface...")
             try:
-                self.rtde_io = rtde_io.RTDEIOInterface(config.ip_address_ur10)
+                self.rtde_io = rtde_io.RTDEIOInterface(config.IP_UR10e)
             except RuntimeError as e:
                 print(f"Make sure the robot is powered on!\nError: {e}")
                 sys.exit('Start Robot!')
@@ -257,17 +257,27 @@ class AsyncHandler:
                 print("STOP DETECTED!")
 
             while status_bit != 1:
-                if status_bit == 3:  # Protective Stop
+                # Protective Stop
+                if status_bit == 3:
                     try:
                         print('Protective Stop detected. Attempting to clear in 5 seconds...')
+                        self.rtde_handler.ur_dashboard_client.closeSafetyPopup()
+                        await asyncio.sleep(0.5)
+                        self.rtde_handler.ur_dashboard_client.popup('Clearing Protective Stop in 5 seconds...')
+
+                        # wait 5 seconds before clearing Protective Stop
                         for i in range(5):
                             print(5 - i)
                             await asyncio.sleep(1)
+
                         self.rtde_handler.ur_dashboard_client.unlockProtectiveStop()
+                        self.rtde_handler.ur_dashboard_client.closePopup()
+                        self.rtde_handler.ur_dashboard_client.popup('Protective Stop Cleared!')
                         print('Protective Stop cleared!')
                         self.rtde_handler.connect_rtde_c()
 
                     except Exception as e:
+                        self.rtde_handler.ur_dashboard_client.popup('Error while trying to clear protective stop!')
                         print(f'Error clearing Protective Stop: {e}')
 
                 else:

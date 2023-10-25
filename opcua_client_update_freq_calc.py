@@ -3,7 +3,7 @@ import config
 from datetime import datetime
 from asyncua import Client
 
-opcua_period = 1000 / config.opcua_frequency
+opcua_period = 1000 / config.OPCUA_FREQ
 
 
 class SubHandler:
@@ -21,7 +21,7 @@ class SubHandler:
         self.prev_time = current_time
 
 async def main():
-    full_path = f"opc.tcp://{config.ip_address_opcua_server}:{config.port_opcua}"
+    full_path = f"opc.tcp://{config.IP_OPCUA}:{config.PORT_OPCUA}"
     # instantiate and connect client
     client = Client(url=full_path)
     try:
