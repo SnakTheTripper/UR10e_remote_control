@@ -432,11 +432,13 @@
         // });
         socket.on('connect', function() {
             console.log('Websocket connected!');
+            socket.emit('page_init');
+            setSliderLimits()
         });
         socket.on('disconnect', reconnectSocket);
         function reconnectSocket() {
             console.log('Websocket disconnected, retrying...');
-            socket = io.connect('http://10.0.0.225:5000');
+            socket = io.connect('http://' + configData.ip_address_flask + ':' + configData.port_flask);
 
             socket.on('connect', function() {
                 console.log('Successfully reconnected!');
@@ -518,13 +520,6 @@
             }
         })
 
-        window.onload = function () {
-            setSliderLimits()
-            socket.emit('page_init');
-            socket.emit('page_init');
-            socket.emit('page_init');   // needs to be called thrice to work properly on local. maybe more for Cloud
-        }
-
         // keep alive
 
         function keepAlive() {
@@ -588,10 +583,10 @@
             </tr>
         </table>
         <div style="display: flex; justify-content: flex-end">
-            <button id="send_output_bits_button" type="button" onclick="sendOutputBits()">Send Output Bits</button>
+            <button id="send_output_bits_button" type="button" onclick="sendOutputBits()" style="display: none">Send Output Bits</button>
             <button type="button" onclick="toggleIOControl()">Toggle I/O Control</button>
         </div>
-        <div id="ioControl" style="block">
+        <div id="ioControl" style="display: none">
             <table class="io_table">
                 <thead>
                     <tr class="io-row">
@@ -720,9 +715,9 @@
         </div>
         <br>
         <div class="center-container">
-            <button style="background-color: green; height: 50px; width: 100px" type="button" onclick="handleSend()">SEND</button>
+            <button style="background-color: green; height: 50px; width: 100px; border-radius: 12px" type="button" onclick="handleSend()">SEND</button>
             <div style="width: 50px;"></div> <!-- Empty element for spacing -->
-            <button style="background-color: crimson; height: 50px; width: 100px" type="button" onclick="handleStop()">STOP</button>
+            <button style="background-color: crimson; height: 50px; width: 100px; border-radius: 12px" type="button" onclick="handleStop()">STOP</button>
         </div>
         <br><br><br>        <!-- PROGRAM LIST -->
 

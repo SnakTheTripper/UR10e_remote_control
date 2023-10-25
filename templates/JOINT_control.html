@@ -10,6 +10,7 @@
         .center-container {
             display: flex;
             justify-content: center;
+            font-family: "Calibri Light";
         }
         .joint-row {
             width: 700px;
@@ -53,9 +54,6 @@
         }
         .target-slider {
             z-index: 2;
-        }
-        .border-right {
-            border-right: 1px solid #000;
         }
         .waypoint-table-header {
             width: 700px;
@@ -175,9 +173,6 @@
 
         // button functions
 
-        // function toggleLiveControl() {
-        //     liveControlEnabled = !liveControlEnabled
-        // }
         function goToTCP() {
             window.location.href = '/tcp_control';
         }
@@ -192,7 +187,6 @@
 
             let slider = document.getElementById(id);
             slider.value = parseFloat(slider.value) + 1;  // adjust step size here
-            console.log('target_joint_box_' + id.split('_')[1])
             updateValue(slider, 'target_joint_box_' + id.split('_')[2]);
         }
         function decreaseSlider(id) {
@@ -201,9 +195,6 @@
             let slider = document.getElementById(id);
             slider.value = parseFloat(slider.value) - 1;  // adjust step size here
             updateValue(slider, 'target_joint_box_' + id.split('_')[2]);
-            // if (liveControlEnabled) {
-            //     handleSend()
-            // }
         }
         function sendOutputBits() {
             for (let i = 0 ; i < 8 ; i++) {
@@ -338,9 +329,13 @@
 
         // Initializes target_position sliders with current_position values for aesthetics (target = current)
         socket.on('page_init_values', function (data) {
+
+            console.log('initializing page')
+
             // itialize control mode switcher button
             control_mode = data.control_mode
             const switchControlButton = document.getElementById('switchControlButton')
+
             if (control_mode === 0) {
                 button_text = 'Switch Control to OPCUA';
             }else if (control_mode === 1) {
@@ -354,12 +349,13 @@
             let current_ja = data.current_joint_accel
             program_list = data.program_list
 
-            for (let i = 0; i < current_jp.length; i++) {
-                const jointSlider = document.getElementById(`target_joint_${i}`);
+            for (let i = 0; i < 6; i++) {
                 const currentJointSlider = document.getElementById(`current_joint_${i}`);
+                const jointSlider = document.getElementById(`target_joint_${i}`);
+
                 jointSlider.value = current_jp[i];
                 currentJointSlider.value = current_jp[i];
-                updateValue(jointSlider, `target_joint_${i}`);
+                updateValue(jointSlider, `current_joint_box_${i}`);
                 updateValue(jointSlider, `target_joint_box_${i}`);
             }
 
@@ -423,9 +419,10 @@
         socket.on('update_control_mode', function (data) {
             control_mode = data.control_mode;
             const switchControlButton = document.getElementById('switchControlButton')
+            let button_text;
             if (control_mode === 0) {
                 button_text = 'Switch Control to OPCUA';
-            }else if (control_mode === 1) {
+            } else if (control_mode === 1) {
                 button_text = 'Switch Control to Flask'
             }
             switchControlButton.innerText = button_text;
@@ -436,16 +433,16 @@
         socket.on('no_program_to_run', function(data) {
             alert('No program to run...')
         });
-        // socket.on('STOP_button', function(data) {
-        //     alert('Program Stopped!')
-        // });
+
         socket.on('connect', function() {
             console.log('Websocket connected!');
+            socket.emit('page_init')
+            setSliderLimits()
         });
         socket.on('disconnect', reconnectSocket);
         function reconnectSocket() {
             console.log('Websocket disconnected, retrying...');
-            socket = io.connect('http://10.0.0.225:5000');
+            socket = io.connect('http://' + configData.ip_address_flask + ':' + configData.port_flask);
 
             socket.on('connect', function() {
                 console.log('Successfully reconnected!');
@@ -461,6 +458,7 @@
         }
         socket.on('update_current_positions', function(data) {
             const positions = data.current_joint;
+            console.log(positions)
             // console.log(positions);
             for (let i = 0; i < 6; i++) {
                 updateCurrentPosition(i, positions[i]);
@@ -509,7 +507,6 @@
                 }
             }
         })
-
         socket.on('update_target_IO', function (data) {
             target_standard_output_bits = data.target_standard_output_bits;
             target_configurable_output_bits = data.target_configurable_output_bits;
@@ -527,15 +524,6 @@
 
             }
         })
-
-        // allows current position flow for a second for initialization
-
-        window.onload = function () {
-            setSliderLimits()
-            socket.emit('page_init');
-            socket.emit('page_init');
-            socket.emit('page_init');   // needs to be called thrice to work properly on local. maybe more for Cloud
-        }
 
         // keep alive
 
@@ -600,10 +588,9 @@
             </tr>
         </table>
         <div style="display: flex; justify-content: flex-end">
-            <button id="send_output_bits_button" type="button" onclick="sendOutputBits()">Send Output Bits</button>
             <button type="button" onclick="toggleIOControl()">Toggle I/O Control</button>
         </div>
-        <div id="ioControl" style="block">
+        <div id="ioControl" style="display: none">
             <table class="io_table">
                 <thead>
                     <tr class="io-row">
@@ -641,7 +628,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr class="io-row">
+                    <tr class="io-row" id="input_bits_row">
                         <td>Input Bits</td>
                         <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
                             <div><span id="standard_input_bit_0">0</span></div>
@@ -668,7 +655,7 @@
                             <div><span id="tool_input_bit_1">0</span></div>
                         </td>
                     </tr>
-                    <tr class="io-row">
+                    <tr class="io-row" id="output_bits_row">
                         <td>Output Bits</td>
                         <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
                             <div><span id="standard_output_bit_0">0</span></div>
@@ -695,7 +682,7 @@
                             <div><span id="tool_output_bit_1">0</span></div>
                         </td>
                     </tr>
-                    <tr class="io-row">
+                    <tr class="io-row" id="target_output_bits_row">
                         <td>Target Output Bits</td>
                         <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
                             <div><input type="checkbox" id="target_standard_output_bit_0"></div>
@@ -732,9 +719,9 @@
         </div>
         <br>
         <div class="center-container">
-            <button style="background-color: green; height: 50px; width: 100px" type="button" onclick="handleSend()">SEND</button>
+            <button style="background-color: green; height: 50px; width: 100px; border-radius: 12px; text-decoration-color: black" type="button" onclick="handleSend()">SEND</button>
             <div style="width: 50px;"></div> <!-- Empty element for spacing -->
-            <button style="background-color: crimson; height: 50px; width: 100px" type="button" onclick="handleStop()">STOP</button>
+            <button style="background-color: crimson; height: 50px; width: 100px; border-radius: 12px" type="button" onclick="handleStop()">STOP</button>
         </div>
         <br><br><br>        <!-- PROGRAM LIST -->
 
