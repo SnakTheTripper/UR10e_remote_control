@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<!--<html xmlns="http://www.w3.org/1999/html">-->
+<head>
+    <title>UR10 Joint Controller</title>
+    <style>
+        .top-button-row {
+            display: flex;
+            justify-content: space-between;
+        }
+        .center-container {
+            display: flex;
+            justify-content: center;
+            font-family: "Calibri Light";
+        }
+        .joint-row {
+            width: 700px;
+            display: grid;
+            grid-template-columns: 1fr 0.5fr 2fr 0.5fr; /* Adjust these fractions based on your needs */
+            grid-gap: 16px; /* Space between each cell */
+            text-align: center;
+            border: 1px solid #000;
+            padding: 8px;
+        }
+        .io-row {
+            width: 700px;
+            display: grid;
+            grid-template-columns: 5fr 8fr 8fr 2fr; /* Adjust these fractions based on your needs */
+            grid-gap: 4px; /* Space between each cell */
+            text-align: center;
+            border: 1px solid #000;
+            padding: 8px;
+        }
+        .parameter_row {
+            width: 700px;
+            display: grid;
+            grid-template-columns: 1fr 0.5fr 2fr 0.5fr; /* Adjust these fractions based on your needs */
+            grid-gap: 16px; /* Space between each cell */
+            text-align: center;
+            border: 1px solid #000;
+            padding: 8px;
+        }
+        .joint-slider-wrapper {
+            position: relative;
+        }
+        .current-slider, .target-slider {
+            position: absolute;
+            text-align: center;
+            width: 75%;
+            left: 11%;
+        }
+        .current-slider {
+            z-index: 1;
+            opacity: 0.75;
+        }
+        .target-slider {
+            z-index: 2;
+        }
+        .waypoint-table-header {
+            width: 700px;
+            display: grid;
+            grid-template-columns: 1fr 2fr 1fr 1fr; /* Adjust these fractions based on your needs */
+            grid-gap: 16px; /* Space between each cell */
+            text-align: center;
+            border: 1px solid #000;
+            padding: 8px;
+        }
+        .waypoint-table-row {
+            display: grid;
+            grid-template-columns: 1fr 2fr 1fr 1fr; /* Adjust these fractions based on your needs */
+            grid-gap: 16px; /* Space between each cell */
+            text-align: center;
+            border: 1px solid #000;
+            padding: 4px;
+        }
+
+
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        var program_list = []                      // kept updated
+        const configData = {{ config_data | tojson | safe }};
+        console.log('configData from config.py:')
+        console.log(configData)
+
+        const jointLimitsLower = configData.joint_limits_lower;
+        const jointLimitsUpper = configData.joint_limits_upper;
+        const tcpLimitsLower = configData.tcp_limits_lower;
+        const tcpLimitsUpper = configData.tcp_limits_upper;
+        const homePositionJoint = configData.home_position_joint
+        // console.log(homePosition)
+
+        let standard_input_bits = []
+        let configurable_input_bits = []
+        let tool_input_bits = []
+        let standard_output_bits = []
+        let configurable_output_bits = []
+        let tool_output_bits = []
+
+        let target_standard_output_bits = []
+        let target_configurable_output_bits = []
+        let target_tool_output_bits = []
+
+        let io_panel_state = 0
+
+        var socket = io.connect('http://' + configData.ip_address_flask + ':' + configData.port_flask)
+
+        function arraysEqual(a, b) {
+            if (a.length !== b.length) return false;
+            for (let i = 0; i < a.length; i++) {
+                if (a[i] !== b[i]) return false;
+            }
+            return true;
+        }
+
+        function updateTable(program_list) {
+            let tableBody = document.getElementById('waypointTable').getElementsByTagName('tbody')[0];
+            tableBody.innerHTML = "";  // Clear existing rows
+
+            for (let i = 0; i < program_list.length; i++) {
+                let row = tableBody.insertRow();
+                row.classList.add('waypoint-table-row');
+
+                let cell1 = row.insertCell(0);
+                let cell2 = row.insertCell(1);
+                let cell3 = row.insertCell(2);
+                let cell4 = row.insertCell(3);
+
+                // console.log(program_list)
+                const move_type = program_list[i][0]
+                let tcpPositionsInMillimeters = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                let jointPositionsInDegrees = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                if (move_type === 0) {
+                    for (let j = 0 ; j < 6 ; j++) {
+                        tcpPositionsInMillimeters[j] = program_list[i][1][j]
+                    }
+                    cell1.innerHTML = "L";
+                    cell2.innerHTML = tcpPositionsInMillimeters.toString();
+                    cell3.innerHTML = (program_list[i][2]).toFixed(1);  // Speed
+                    cell4.innerHTML = (program_list[i][3]).toFixed(1);  // Acceleration
+                }else if (move_type === 1) {
+                    for (let j = 0 ; j < 6 ; j++) {
+                        jointPositionsInDegrees[j] = program_list[i][1][j]
+                    }
+                    cell1.innerHTML = "J"
+                    cell2.innerHTML = jointPositionsInDegrees.toString();
+                    cell3.innerHTML = program_list[i][2].toFixed(1);  // Speed
+                    cell4.innerHTML = program_list[i][3].toFixed(1);  // Acceleration
+                }
+            }
+        }
+        function updateValue(slider, output) {
+            const degrees = parseFloat(slider.value);
+            document.getElementById(output).innerText = degrees.toFixed(2); // Display as degrees with 2 decimal places
+        }
+        function updateCurrentPosition(joint, position) {
+            const slider = document.getElementById(`current_joint_${joint}`);
+            slider.value = position;
+            updateValue(slider, `current_joint_${joint}`);
+            document.getElementById(`current_joint_box_${joint}`).innerText = position.toFixed(2); // This line is new
+        }
+        function setSliderLimits() {
+            for (let i = 0; i < 6; i++) {
+                const target_slider = document.getElementById(`target_joint_${i}`);
+                const current_slider = document.getElementById(`current_joint_${i}`);
+                if (target_slider) {
+                    target_slider.min = jointLimitsLower[i];
+                    target_slider.max = jointLimitsUpper[i];
+
+                    current_slider.min = jointLimitsLower[i];
+                    current_slider.max = jointLimitsUpper[i];
+                }
+            }
+        }
+
+
+        // button functions
+
+        function goToTCP() {
+            window.location.href = '/tcp_control';
+        }
+        function switchControl() {
+            socket.emit('button_press', {action: 'switchControl'})
+        }
+        function goToHome() {
+            window.location.href = '/';
+        }
+        function increaseSlider(id) {
+            console.log("IncreaseSlider called with id: ", id);
+
+            let slider = document.getElementById(id);
+            slider.value = parseFloat(slider.value) + 1;  // adjust step size here
+            updateValue(slider, 'target_joint_box_' + id.split('_')[2]);
+        }
+        function decreaseSlider(id) {
+            console.log("DecreaseSlider called with id: ", id);
+
+            let slider = document.getElementById(id);
+            slider.value = parseFloat(slider.value) - 1;  // adjust step size here
+            updateValue(slider, 'target_joint_box_' + id.split('_')[2]);
+        }
+        function sendOutputBits() {
+            for (let i = 0 ; i < 8 ; i++) {
+                const target_standard_output_bits_checkbox = document.getElementById(`target_standard_output_bit_${i}`)
+                const target_configurable_output_bits_checkbox = document.getElementById(`target_configurable_output_bit_${i}`)
+                target_standard_output_bits[i] = target_standard_output_bits_checkbox.checked ? 1 : 0
+                target_configurable_output_bits[i] = target_configurable_output_bits_checkbox.checked ? 1 : 0
+            }
+            for (let i = 0 ; i < 2 ; i++) {
+                const target_tool_output_bits_checkbox = document.getElementById(`target_tool_output_bit_${i}`)
+                target_tool_output_bits[i] = target_tool_output_bits_checkbox.checked ? 1 : 0
+                }
+            socket.emit('button_press', {
+                    action: 'send_output_bits',
+                    target_standard_output_bits: target_standard_output_bits,
+                    target_configurable_output_bits: target_configurable_output_bits,
+                    target_tool_output_bits: target_tool_output_bits
+            })
+            console.log(target_standard_output_bits)
+            console.log(target_configurable_output_bits)
+            console.log(target_tool_output_bits)
+        }
+        function toggleIOControl() {
+            io_panel_state = io_panel_state === 0 ? 1 : 0;
+
+            const ioControlDiv = document.getElementById("ioControl");
+            const ioSendButton = document.getElementById("send_output_bits_button");
+            ioControlDiv.style.display = io_panel_state === 0 ? "block" : "none";
+            ioSendButton.style.display = io_panel_state === 0 ? "block" : "none";
+            socket.emit('button_press', {action: 'toggleIoPanel', io_panel_state: io_panel_state})
+        }
+        function handleSend() {
+            const jp = [];
+            for (let i = 0; i < 6; i++) {
+                jp.push(parseFloat(document.getElementById(`target_joint_${i}`).value));
+            }
+            const js = parseFloat(document.getElementById('joint_speed').value);
+            const ja = parseFloat(document.getElementById('joint_accel').value);
+
+            socket.emit('button_press', {action: 'send',
+            move_type: 1,           // for joint control
+            target_joint_positions: jp,
+            joint_speed: js,
+            joint_accel: ja})
+        }
+        function randomizeJointValues() {
+            // Generate random values between -360 and 360 for each joint
+            for (let i = 0; i < 6; i++) {
+                const lowerLimit = jointLimitsLower[i];
+                const upperLimit = jointLimitsUpper[i];
+                const randomValue = lowerLimit + (Math.random() * (upperLimit - lowerLimit));
+
+                const jointInput = document.getElementById(`target_joint_${i}`);
+                const outputSpan = document.getElementById(`target_joint_box_${i}`);
+
+                if (jointInput && outputSpan) {
+                    jointInput.value = randomValue;
+                    updateValue(jointInput, `target_joint_box_${i}`);
+                }
+            }
+        }
+        function sendHome() {
+            // send home with moveJ to "untangle" joints
+            const js = parseFloat(document.getElementById('joint_speed').value);
+            const ja = parseFloat(document.getElementById('joint_accel').value);
+
+            socket.emit('button_press', {action: 'send',
+            move_type: 1,           // for joint control
+            target_joint_positions: homePositionJoint,
+            joint_speed: js,
+            joint_accel: ja})
+
+            for (let i = 0; i < 6; i++) {
+                const jointSlider = document.getElementById(`target_joint_${i}`);
+                jointSlider.value = homePositionJoint[i];
+                updateValue(jointSlider, `target_joint_${i}`);
+                // updateValue(jointSlider, `target_joint${i}`);
+            }
+        }
+        function handleStop() {
+            socket.emit('button_press', {action: 'stop'})
+        }
+        function addToList() {
+            const jp = [];
+            for (let i = 0; i < 6; i++) {
+                jp.push(parseFloat(document.getElementById(`target_joint_${i}`).value));
+            }
+            const jv = parseFloat(document.getElementById('joint_speed').value);
+            const ja = parseFloat(document.getElementById('joint_accel').value);
+
+            socket.emit('button_press', {action: 'addToList', move_type: 1, target_pos: jp, speed: jv, accel: ja})
+        }
+        function deleteFromList() {
+            socket.emit('button_press', {action: 'deleteFromList'})
+        }
+        function clearList() {
+            socket.emit('button_press', {action: 'clearList'})
+        }
+        function runProgram() {
+            socket.emit('button_press', {action: 'runProgram'})
+        }
+        function randomProgram() {
+            for (let i = 0 ; i < 10 ; i++) {
+                randomizeJointValues()
+                addToList()
+            }
+        }
+
+        // socket.on section
+
+        // syncs target and speed + accel sliders across web clients
+        // called whenever SEND button used
+        socket.on('update_target_positions', function(data) {
+            let target_positions = data.target_joint_positions;
+            for (let i = 0; i < target_positions.length; i++) {
+                const jointSlider = document.getElementById(`target_joint_${i}`);
+                jointSlider.value = target_positions[i];
+                updateValue(jointSlider, `target_joint_box_${i}`);
+            }
+
+            let target_speed = data.speedJ;
+            let target_accel = data.accelJ;
+
+            // console.log(target_speed)
+            // console.log(target_accel)
+
+            const speed_slider = document.getElementById('joint_speed');
+            const accel_slider = document.getElementById('joint_accel');
+            speed_slider.value = target_speed
+            accel_slider.value = target_accel
+            updateValue(speed_slider, 'joint_speed_box')
+            updateValue(accel_slider, 'joint_accel_box')
+
+        });
+
+        // Initializes target_position sliders with current_position values for aesthetics (target = current)
+        socket.on('page_init_values', function (data) {
+
+            console.log('initializing page')
+
+            // itialize control mode switcher button
+            control_mode = data.control_mode
+            const switchControlButton = document.getElementById('switchControlButton')
+
+            if (control_mode === 0) {
+                button_text = 'Switch Control to OPCUA';
+            }else if (control_mode === 1) {
+                button_text = 'Switch Control to Flask'
+            }
+            switchControlButton.innerText = button_text;
+
+            // update current position sliders
+            let current_jp = data.current_joint_positions
+            let current_js = data.current_joint_speed
+            let current_ja = data.current_joint_accel
+            program_list = data.program_list
+
+            for (let i = 0; i < 6; i++) {
+                const currentJointSlider = document.getElementById(`current_joint_${i}`);
+                const jointSlider = document.getElementById(`target_joint_${i}`);
+
+                jointSlider.value = current_jp[i];
+                currentJointSlider.value = current_jp[i];
+                updateValue(jointSlider, `current_joint_box_${i}`);
+                updateValue(jointSlider, `target_joint_box_${i}`);
+            }
+
+            // initialize speed and accel sliders too
+            const speedSlider = document.getElementById('joint_speed')
+            const accelSlider = document.getElementById('joint_accel')
+            updateValue(speedSlider, 'joint_speed_box')
+            updateValue(accelSlider, 'joint_accel_box')
+
+            speedSlider.value = current_js
+            accelSlider.value = current_ja
+            updateValue(speedSlider, 'joint_speed_box')
+            updateValue(accelSlider, 'joint_accel_box')
+
+            // initialize IO panel state
+            io_panel_state = data.io_panel_state
+
+            const ioControlDiv = document.getElementById("ioControl");
+            const ioSendButton = document.getElementById("send_output_bits_button");
+            ioControlDiv.style.display = io_panel_state === 0 ? "block" : "none";
+            ioSendButton.style.display = io_panel_state === 0 ? "block" : "none";
+            socket.emit('button_press', {action: 'toggleIoPanel', io_panel_state: io_panel_state})
+
+            // initialize IO table
+            let initial_standard_input_bits = data.standard_input_bits
+            let initial_configurable_input_bits = data.configurable_input_bits
+            let initial_tool_input_bits = data.tool_input_bits
+
+            // these variables have been declared in global scope
+            target_standard_output_bits = data.standard_output_bits
+            target_configurable_output_bits = data.configurable_output_bits
+            target_tool_output_bits = data.tool_output_bits
+
+            for (let i = 0 ; i < 8 ; i++) {
+                const target_standard_output_bits_checkbox = document.getElementById(`target_standard_output_bit_${i}`)
+                const target_configurable_output_bits_checkbox = document.getElementById(`target_configurable_output_bit_${i}`)
+                target_standard_output_bits_checkbox.checked = (target_standard_output_bits[i] === 1);
+                target_configurable_output_bits_checkbox.checked = (target_configurable_output_bits[i] === 1);
+
+                const standard_output_bits = document.getElementById(`standard_output_bit_${i}`)
+                const configurable_output_bits = document.getElementById(`configurable_output_bit_${i}`)
+                standard_output_bits.innerText = target_standard_output_bits[i]
+                configurable_output_bits.innerText = target_configurable_output_bits[i]
+
+                const standard_input_bits = document.getElementById(`standard_input_bit_${i}`)
+                const configurable_input_bits = document.getElementById(`configurable_input_bit_${i}`)
+                standard_input_bits.innerText = initial_standard_input_bits[i]
+                configurable_input_bits.innerText = initial_configurable_input_bits[i]
+            }
+            for (let i = 0 ; i < 2 ; i++) {
+                const target_tool_output_bits_checkbox = document.getElementById(`target_tool_output_bit_${i}`)
+                target_tool_output_bits_checkbox.checked = (target_tool_output_bits[i] === 1);
+
+                const tool_output_bits = document.getElementById(`tool_output_bit_${i}`)
+                tool_output_bits.innerText = target_tool_output_bits[i]
+
+                const tool_input_bits = document.getElementById(`tool_input_bit_${i}`)
+                tool_input_bits.innerText = initial_tool_input_bits[i]
+
+            }
+
+            // initialize program list
+            updateTable(program_list)
+        });
+
+        socket.on('updateTable', function(data) {
+            program_list = data.program_list
+            updateTable(program_list)
+        });
+        socket.on('update_control_mode', function (data) {
+            control_mode = data.control_mode;
+            const switchControlButton = document.getElementById('switchControlButton')
+            let button_text;
+            if (control_mode === 0) {
+                button_text = 'Switch Control to OPCUA';
+            } else if (control_mode === 1) {
+                button_text = 'Switch Control to Flask'
+            }
+            switchControlButton.innerText = button_text;
+        })
+        socket.on('program_end', function(data) {
+            alert('Program ran to the end')
+        });
+        socket.on('no_program_to_run', function(data) {
+            alert('No program to run...')
+        });
+
+        socket.on('connect', function() {
+            console.log('Websocket connected!');
+            socket.emit('page_init')
+            setSliderLimits()
+        });
+        socket.on('disconnect', reconnectSocket);
+        function reconnectSocket() {
+            console.log('Websocket disconnected, retrying...');
+            socket = io.connect('http://' + configData.ip_address_flask + ':' + configData.port_flask);
+
+            socket.on('connect', function() {
+                console.log('Successfully reconnected!');
+                // Remove the 'connect' and 'disconnect' listeners to avoid stacking them.
+                socket.off('connect');
+                socket.off('disconnect');
+            });
+
+            socket.on('disconnect', function() {
+                // Delay before trying to reconnect
+                setTimeout(reconnectSocket, 3000);
+            });
+        }
+        socket.on('update_current_positions', function(data) {
+            const positions = data.current_joint;
+            console.log(positions)
+            // console.log(positions);
+            for (let i = 0; i < 6; i++) {
+                updateCurrentPosition(i, positions[i]);
+            }
+        });
+        socket.on('update_current_IO', function (data) {
+            old_standard_input_bits = standard_input_bits
+            old_configurable_input_bits = configurable_input_bits
+            old_tool_input_bits = tool_input_bits
+            old_standard_output_bits = standard_output_bits
+            old_configurable_output_bits = configurable_output_bits
+            old_tool_output_bits = tool_output_bits
+
+            standard_input_bits = data.standard_input_bits;
+            configurable_input_bits = data.configurable_input_bits;
+            tool_input_bits = data.tool_input_bits;
+            standard_output_bits = data.standard_output_bits;
+            configurable_output_bits = data.configurable_output_bits;
+            tool_output_bits = data.tool_output_bits;
+
+            if (
+                !arraysEqual(old_standard_input_bits, standard_input_bits) ||
+                !arraysEqual(old_configurable_input_bits, configurable_input_bits) ||
+                !arraysEqual(old_tool_input_bits, tool_input_bits) ||
+                !arraysEqual(old_standard_output_bits, standard_output_bits) ||
+                !arraysEqual(old_configurable_output_bits, configurable_output_bits) ||
+                !arraysEqual(old_tool_output_bits, tool_output_bits)
+            ) {
+                for (let i = 0; i < 8; i++) {
+                    // update standard and configurable I/O indicators
+                    const standard_input_bit_indicator = document.getElementById(`standard_input_bit_${i}`)
+                    const configurable_input_bit_indicator = document.getElementById(`configurable_input_bit_${i}`)
+                    const standard_output_bit_indicator = document.getElementById(`standard_output_bit_${i}`)
+                    const configurable_output_bit_indicator = document.getElementById(`configurable_output_bit_${i}`)
+                    standard_input_bit_indicator.innerText = standard_input_bits[i]
+                    configurable_input_bit_indicator.innerText = configurable_input_bits[i]
+                    standard_output_bit_indicator.innerText = standard_output_bits[i]
+                    configurable_output_bit_indicator.innerText = configurable_output_bits[i]
+                }
+                for (let i = 0; i < 2; i++) {
+                    // update tool I/O bit indicators
+                    const tool_input_bit_indicator = document.getElementById(`tool_input_bit_${i}`)
+                    const tool_output_bit_indicator = document.getElementById(`tool_output_bit_${i}`)
+                    tool_input_bit_indicator.innerText = tool_input_bits[i]
+                    tool_output_bit_indicator.innerText = tool_output_bits[i]
+                }
+            }
+        })
+        socket.on('update_target_IO', function (data) {
+            target_standard_output_bits = data.target_standard_output_bits;
+            target_configurable_output_bits = data.target_configurable_output_bits;
+            target_tool_output_bits = data.target_tool_output_bits;
+
+            for (let i = 0 ; i < 8 ; i++) {
+                const target_standard_output_bits_checkbox = document.getElementById(`target_standard_output_bit_${i}`)
+                const target_configurable_output_bits_checkbox = document.getElementById(`target_configurable_output_bit_${i}`)
+                target_standard_output_bits_checkbox.checked = (target_standard_output_bits[i] === 1);
+                target_configurable_output_bits_checkbox.checked = (target_configurable_output_bits[i] === 1);
+            }
+            for (let i = 0 ; i < 2 ; i++) {
+                const target_tool_output_bits_checkbox = document.getElementById(`target_tool_output_bit_${i}`)
+                target_tool_output_bits_checkbox.checked = (target_tool_output_bits[i] === 1);
+
+            }
+        })
+
+        // keep alive
+
+        function keepAlive() {
+            socket.emit('keep_alive', {data: 'Client is alive'});
+        }
+        socket.on('keep_alive', function(data) {
+            const msg = data.message
+            console.log(msg)
+        });
+        setInterval(keepAlive, 5000)
+    </script>
+</head>
+<body class="center-container">
+    <form action="/" method="post">
+        <div class="top-button-row">
+            <button type="button" onclick="goToTCP()">Switch to TCP Control</button>
+            <button type="button" onclick="switchControl()" id="switchControlButton">Switch Control Mode</button>
+            <button type="button" onclick="goToHome()">Home Page</button>
+        </div>
+        <br>
+
+        <table>
+            <caption>Joint Control</caption>
+            {% set joint_names = ["Base", "Shoulder", "Elbow", "Wrist 1", "Wrist 2", "Wrist 3"] %}
+            {% for i in range(6) %}
+                <tr class="joint-row", style="text-align: right">
+                    <th scope="row"><label>{{ joint_names[i] }} (deg):</label></th>
+                    <td><span id="current_joint_box_{{ i }}">0.00</span></td>
+                    <td class="joint-slider-wrapper">
+                        <div style="display: flex; justify-content: space-between;">
+                            <button type="button" onclick="decreaseSlider('target_joint_{{ i }}')">-</button>
+                            <input type="range" id="target_joint_{{ i }}" name="target_joint_{{ i }}" class="target-slider" min="-360" max="360" step="1" value="{{ request.form['target_joint_' ~ i] }}" oninput="updateValue(this, 'target_joint_box_{{ i }}')">
+                            <input type="range" id="current_joint_{{ i }}" name="current_joint_{{ i }}" class="current-slider" min="-360" max="360" step="0.01">
+                            <button type="button" onclick="increaseSlider('target_joint_{{ i }}')">+</button>
+                        </div>
+                    </td>
+                    <td style="text-align: center"><span id="target_joint_box_{{ i }}">0.00</span></td>
+                </tr>
+            {% endfor %}
+            <tr class="parameter_row">
+                <th scope="row" style="text-align: right"><label> Speed (deg/s):</label></th>
+                <td></td>
+                <td class="joint-slider-wrapper" >
+                    <div style="display: flex; justify-content: space-between">
+                        <button type="button" onclick="decreaseSlider('joint_speed')">-</button>
+                        <input type="range" class="target-slider" id="joint_speed" name="joint_speed" min="1" max="179" step="1" value="{{ request.form['joint_speed']|default('10') }}" oninput="updateValue(this, 'joint_speed_box')">
+                        <button type="button" onclick="increaseSlider('joint_speed')">+</button>
+                    </div>
+                </td>
+                <td><span id="joint_speed_box">0.00</span></td>
+            <tr class="parameter_row">
+                <th scope="row" style="text-align: right"><label> Acceleration (deg/s^2):</label></th>
+                <td></td>
+                <td class="joint-slider-wrapper">
+                    <div style="display: flex; justify-content: space-between">
+                        <button type="button" onclick="decreaseSlider('joint_accel')">-</button>
+                        <input type="range" class="target-slider" id="joint_accel" name="joint_accel" min="1" max="179" step="1" value="{{ request.form['joint_accel']|default('10') }}" oninput="updateValue(this, 'joint_accel_box')">
+                        <button type="button" onclick="increaseSlider('joint_accel')">+</button>
+                    </div>
+                <td><span id="joint_accel_box">0.00</span></td>
+            </tr>
+        </table>
+        <div style="display: flex; justify-content: flex-end">
+            <button type="button" onclick="toggleIOControl()">I/O Control</button>
+        </div>
+        <div id="ioControl" style="display: none">
+            <table class="io_table">
+                <thead>
+                    <tr class="io-row">
+                        <td></td>
+                        <th>Standard</th>
+                        <th>Configurable</th>
+                        <th>Tool</th>
+                    </tr>
+                    <tr class="io-row" >
+                        <th>I/O Bit ID</th>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div>0</div>
+                            <div>1</div>
+                            <div>2</div>
+                            <div>3</div>
+                            <div>4</div>
+                            <div>5</div>
+                            <div>6</div>
+                            <div>7</div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div>0</div>
+                            <div>1</div>
+                            <div>2</div>
+                            <div>3</div>
+                            <div>4</div>
+                            <div>5</div>
+                            <div>6</div>
+                            <div>7</div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr">
+                            <div>0</div>
+                            <div>1</div>
+                        </td>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="io-row" id="input_bits_row">
+                        <td>Input Bits</td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div><span id="standard_input_bit_0">0</span></div>
+                            <div><span id="standard_input_bit_1">0</span></div>
+                            <div><span id="standard_input_bit_2">0</span></div>
+                            <div><span id="standard_input_bit_3">0</span></div>
+                            <div><span id="standard_input_bit_4">0</span></div>
+                            <div><span id="standard_input_bit_5">0</span></div>
+                            <div><span id="standard_input_bit_6">0</span></div>
+                            <div><span id="standard_input_bit_7">0</span></div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div><span id="configurable_input_bit_0">0</span></div>
+                            <div><span id="configurable_input_bit_1">0</span></div>
+                            <div><span id="configurable_input_bit_2">0</span></div>
+                            <div><span id="configurable_input_bit_3">0</span></div>
+                            <div><span id="configurable_input_bit_4">0</span></div>
+                            <div><span id="configurable_input_bit_5">0</span></div>
+                            <div><span id="configurable_input_bit_6">0</span></div>
+                            <div><span id="configurable_input_bit_7">0</span></div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr">
+                            <div><span id="tool_input_bit_0">0</span></div>
+                            <div><span id="tool_input_bit_1">0</span></div>
+                        </td>
+                    </tr>
+                    <tr class="io-row" id="output_bits_row">
+                        <td>Output Bits</td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div><span id="standard_output_bit_0">0</span></div>
+                            <div><span id="standard_output_bit_1">0</span></div>
+                            <div><span id="standard_output_bit_2">0</span></div>
+                            <div><span id="standard_output_bit_3">0</span></div>
+                            <div><span id="standard_output_bit_4">0</span></div>
+                            <div><span id="standard_output_bit_5">0</span></div>
+                            <div><span id="standard_output_bit_6">0</span></div>
+                            <div><span id="standard_output_bit_7">0</span></div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div><span id="configurable_output_bit_0">0</span></div>
+                            <div><span id="configurable_output_bit_1">0</span></div>
+                            <div><span id="configurable_output_bit_2">0</span></div>
+                            <div><span id="configurable_output_bit_3">0</span></div>
+                            <div><span id="configurable_output_bit_4">0</span></div>
+                            <div><span id="configurable_output_bit_5">0</span></div>
+                            <div><span id="configurable_output_bit_6">0</span></div>
+                            <div><span id="configurable_output_bit_7">0</span></div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr">
+                            <div><span id="tool_output_bit_0">0</span></div>
+                            <div><span id="tool_output_bit_1">0</span></div>
+                        </td>
+                    </tr>
+                    <tr class="io-row" id="target_output_bits_row">
+                        <td>Target Output Bits</td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div><input type="checkbox" id="target_standard_output_bit_0"></div>
+                            <div><input type="checkbox" id="target_standard_output_bit_1"></div>
+                            <div><input type="checkbox" id="target_standard_output_bit_2"></div>
+                            <div><input type="checkbox" id="target_standard_output_bit_3"></div>
+                            <div><input type="checkbox" id="target_standard_output_bit_4"></div>
+                            <div><input type="checkbox" id="target_standard_output_bit_5"></div>
+                            <div><input type="checkbox" id="target_standard_output_bit_6"></div>
+                            <div><input type="checkbox" id="target_standard_output_bit_7"></div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
+                            <div><input type="checkbox" id="target_configurable_output_bit_0"></div>
+                            <div><input type="checkbox" id="target_configurable_output_bit_1"></div>
+                            <div><input type="checkbox" id="target_configurable_output_bit_2"></div>
+                            <div><input type="checkbox" id="target_configurable_output_bit_3"></div>
+                            <div><input type="checkbox" id="target_configurable_output_bit_4"></div>
+                            <div><input type="checkbox" id="target_configurable_output_bit_5"></div>
+                            <div><input type="checkbox" id="target_configurable_output_bit_6"></div>
+                            <div><input type="checkbox" id="target_configurable_output_bit_7"></div>
+                        </td>
+                        <td style="display: grid; grid-template-columns: 1fr 1fr">
+                            <div><input type="checkbox" id="target_tool_output_bit_0"></div>
+                            <div><input type="checkbox" id="target_tool_output_bit_1"></div>
+                        </td>
+                    </tr>
+                </tbody>
+              </table>
+        </div>
+        <div style="display: flex; justify-content: flex-end">
+            <button id="send_output_bits_button" type="button" onclick="sendOutputBits()" style="display: none">Send Output Bits</button>
+        </div>
+        <br>
+        <div class="center-container">
+            <button type="button" onclick="randomizeJointValues()">Randomize Joint Values</button>
+            <button type="button" onclick="sendHome()">Send Home</button>
+        </div>
+        <br>
+        <div class="center-container">
+            <button style="background-color: green; height: 50px; width: 100px; border-radius: 12px; text-decoration-color: black" type="button" onclick="handleSend()">SEND</button>
+            <div style="width: 50px;"></div> <!-- Empty element for spacing -->
+            <button style="background-color: crimson; height: 50px; width: 100px; border-radius: 12px" type="button" onclick="handleStop()">STOP</button>
+        </div>
+        <br><br><br>        <!-- PROGRAM LIST -->
+
+        <div class="center-container">
+            <button type="button" onclick="addToList()">Add</button>
+            <button type="button" onclick="deleteFromList()">Delete last entry</button>
+            <button type="button" onclick="clearList()">CLEAR</button>
+            <button type="button" onclick="runProgram()">Run Program</button>
+            <button type="button" onclick="randomProgram()">Generate Random Program</button>
+        </div>
+
+        <br>
+        <div class="center-container">
+            <table id="waypointTable">
+                <thead>
+                    <tr class="waypoint-table-header">
+                        <th>Move Type</th>
+                        <th>Target Positions</th>
+                        <th>Speed</th>
+                        <th>Acceleration</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Program Rows will go here -->
+                </tbody>
+            </table>
+        </div>
+    </form>
+</body>

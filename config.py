@@ -1,6 +1,8 @@
 from ur10e_programs import programs
 from enum import Enum
 
+ONLINE_MODE = True
+
 # ------------------ IP Addresses ------------------
 
 IP_UR10e = "10.0.0.100"      # URSim on Snak's Laptop
@@ -8,29 +10,29 @@ IP_UR10e = "10.0.0.100"      # URSim on Snak's Laptop
 IP_BRIDGE = "10.0.0.225"
 IP_MWARE = "10.0.0.225"
 IP_FLASK_LOCAL = "10.0.0.225"
+IP_FLASK_CLOUD = "20.100.204.66"
 IP_OPCUA = "10.0.0.225"
 
 PORT_UR_DASHBOARD = 29999   # port for UR dashboard client
-PORT_FLASK = 5000           # port of Flask Server
+PORT_FLASK_WEB = 8090           # port of Flask Server
 PORT_OPCUA = 5001           # port of OPCUA Server
 
 # ------------------ Ports ---------------------------
 
-PORT_B_MW = 5555            # bridge to MW
-PORT_MW_B = 5556            # MW to bridge
-PORT_F_MW = 5557            # Flask to MW
-PORT_MW_F = 5558            # MW to Flask
+PORT_B_MW = 5555          # bridge to MW
+PORT_MW_B = 5556          # MW to bridge
+PORT_FLASK_POLL = 8091      # MW to Flask and back
+PORT_FLASK_UPDATE = 8092    # MW to Flask
 PORT_MW_OP = 5559           # MW to OPCUA
 PORT_OP_MW = 5560           # OPCUA to MW
 
 # ------------------ Frequencies ---------------------
 
-RTDE_FREQ = 500             # [1 - 500] Hz
+RTDE_FREQ = 500             # [1 - rtde_frequency]
 FLASK_FREQ = 500            # [1 - rtde_frequency]
 OPCUA_FREQ = 20             # [1 - rtde_frequency]
 
 # ------------------ Control Modes --------------------
-
 class ControlModes(Enum):
     FLASK = 0
     OPCUA = 1

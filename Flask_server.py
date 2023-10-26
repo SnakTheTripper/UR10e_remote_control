@@ -2,7 +2,7 @@ import json
 import sys
 import threading
 import time
-
+from queue import Queue
 import zmq
 from flask import Flask, render_template, redirect
 from flask_socketio import SocketIO
@@ -17,7 +17,7 @@ flask_per = freq_dict['flask_per']
 
 def gather_config_data_for_JavaScript():
     return {'ip_address_flask': config.IP_FLASK_LOCAL,
-            'port_flask': config.PORT_FLASK,
+            'port_flask': config.PORT_FLASK_WEB,
             'joint_limits_lower': config.joint_limits_lower,
             'joint_limits_upper': config.joint_limits_upper,
             'tcp_limits_lower': config.tcp_limits_lower,
@@ -96,8 +96,8 @@ class MiddleWare:
         self.socket = socket
         context = zmq.Context()
 
-        self.pub_socket = context.socket(zmq.PUB)
-        self.sub_socket = context.socket(zmq.SUB)
+        self.polling_socket = context.socket(zmq.REP)
+        self.update_socket = context.socket(zmq.SUB)
 
         self.topic = None
         self.received_message = None
@@ -109,18 +109,27 @@ class MiddleWare:
     def connect_to_mw(self):
         # Connect to MW
         try:
-            self.pub_socket.connect(f"tcp://{config.IP_FLASK_LOCAL}:{config.PORT_F_MW}")
-            self.sub_socket.connect(f"tcp://{config.IP_MWARE}:{config.PORT_MW_F}")
+            self.polling_socket.bind(f"tcp://*:{config.PORT_FLASK_POLL}")
+            self.update_socket.bind(f"tcp://*:{config.PORT_FLASK_UPDATE}")
 
-            self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"Joint_States")
-            self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"switchControl")
+            self.update_socket.setsockopt(zmq.SUBSCRIBE, b"Joint_States")
+            self.update_socket.setsockopt(zmq.SUBSCRIBE, b"switchControl")
+
+            print(f'Bound ports {config.PORT_FLASK_POLL} & {config.PORT_FLASK_UPDATE} to listen to MW')
         except Exception as e:
             sys.exit(f"Error with ports {config.PORT_F_MW} & {config.PORT_MW_F}: {e}")
+
+    def receive_polling(self):
+        while True:
+            self.polling_socket.recv()
+            # print(f"I got this message: {message.decode()}")
+            buttons.process_queue()
 
     def receive_from_mw(self):  # on web client
         while True:
             try:
-                [self.topic, self.received_message] = self.sub_socket.recv_multipart()
+                [self.topic, self.received_message] = self.update_socket.recv_multipart()
+                # print(f'message from WM: {json.loads(self.received_message.decode())}')
             except Exception as e:
                 print(f"Error in receiving the actual joint positions!: {e}")
 
@@ -180,10 +189,10 @@ class FlaskServer:
 
 
 class SocketIOEvents:
-    def __init__(self, sck):
+    def __init__(self, sck, btns):
         self.socket = sck
         self.web = WebMethods(self.socket)
-        self.buttons = Buttons(self.socket)
+        self.buttons = btns
 
         self.register_events()
 
@@ -208,6 +217,8 @@ class SocketIOEvents:
                 self.buttons.runProgram()
             elif action == "switchControl":
                 self.buttons.switchControl()
+            elif action == "toggleIoPanel":
+                self.toggleIoPanel(command_data)
 
             # update program list with every button press
             self.socket.emit('updateTable', {'program_list': local_ur10e.program_list})
@@ -221,6 +232,9 @@ class SocketIOEvents:
         def handle_keep_alive(message):
             # print(message["data"])
             self.socket.emit('keep_alive', {'message': 'Server is alive too'})
+
+    def toggleIoPanel(self, data):
+        self.buttons.io_panel_state = data["io_panel_state"]
 
 
 class WebMethods:
@@ -272,20 +286,24 @@ class WebMethods:
                                               'tool_input_bits': local_ur10e.tool_input_bits,
                                               'standard_output_bits': local_ur10e.standard_output_bits,
                                               'configurable_output_bits': local_ur10e.configurable_output_bits,
-                                              'tool_output_bits': local_ur10e.tool_output_bits})
+                                              'tool_output_bits': local_ur10e.tool_output_bits,
+                                              'io_panel_state': buttons.io_panel_state})
 
 
 class Buttons:
     def __init__(self, socketio):
         self.socket = socketio
         self.web = WebMethods(self.socket)
+        self.io_panel_state = 0
 
         self.global_stop_flag = False
+
+        self.message_queue = Queue()
 
     def send_movement(self):
         message = local_ur10e.gather_to_send_command_values()  # gathers and sends relevant data from central_data to MW
         serialized_message = json.dumps(message).encode()
-        mw_handler.pub_socket.send_multipart([b"Move_Command", serialized_message])
+        self.message_queue.put([b"Move_Command", serialized_message])
         # send package to web clients, so it updates other clients too
         self.web.update_target_positions()
 
@@ -298,7 +316,7 @@ class Buttons:
         # send newly updated targets to MW
         message = local_ur10e.gather_to_send_output_bits()
         serialized_message = json.dumps(message).encode()
-        mw_handler.pub_socket.send_multipart([b"output_bit_command", serialized_message])
+        self.message_queue.put([b"output_bit_command", serialized_message])
         # send package to web clients, so it updates other clients too
         self.web.update_target_IO()
 
@@ -431,34 +449,54 @@ class Buttons:
 
         print(f'New control_mode: {new_control_mode}')
         local_ur10e.control_mode = new_control_mode
-        mw_handler.pub_socket.send_multipart([topic, json.dumps(new_control_mode).encode()])
+        self.message_queue.put([topic, json.dumps(new_control_mode).encode()])
 
         self.socket.emit('update_control_mode', {'control_mode': local_ur10e.control_mode})
+
+    def process_queue(self):
+        if not self.message_queue.empty():
+            topic, msg = self.message_queue.get()
+            try:
+                mw_handler.polling_socket.send_multipart([topic, msg])
+            except Exception as e:
+                print(e)
+        else:
+            topic = b'chill'
+            msg = b'blank'
+            mw_handler.polling_socket.send_multipart([topic, msg])
 
 
 if __name__ == '__main__':
     local_ur10e = UR10e()  # local robot object state
     local_ur10e.program_list = config.STARTER_PROGRAM
 
-    app = FlaskServer().get_app()
+    flask_server = FlaskServer()
+    app = flask_server.get_app()
 
     # install gevent and gevent-websocket to run in production mode
     # web client updates are much slower when in production mode
     # socket = SocketIO(app, async_mode='gevent')
     socket = SocketIO(app)
+    buttons = Buttons(socket)
+
+    SocketIOEvents(socket, buttons)
+
 
     def run_app():
-        SocketIOEvents(socket)
-        serve(app, host=config.IP_FLASK_LOCAL, port=config.PORT_FLASK)
+        serve(app, host="0.0.0.0", port=config.PORT_FLASK_WEB)
 
         # this is only for gevent
         # socket.run(app, host=config.IP_FLASK_LOCAL, port=config.PORT_FLASK, debug=False,
         #            allow_unsafe_werkzeug=True)
 
+    flask_thread = threading.Thread(target=run_app)
+    flask_thread.start()
 
     mw_handler = MiddleWare()
     receiver_thread = threading.Thread(target=mw_handler.receive_from_mw)
     receiver_thread.start()
 
-    flask_thread = threading.Thread(target=run_app)
-    flask_thread.start()
+    receive_polling_thread = threading.Thread(target=mw_handler.receive_polling())
+    receive_polling_thread.start()
+
+

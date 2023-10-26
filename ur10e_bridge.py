@@ -13,8 +13,9 @@ import config
 import project_utils as pu
 
 # disable when running on Linux based systems
-# from asyncio.windows_events import WindowsSelectorEventLoopPolicy
-# asyncio.set_event_loop_policy(WindowsSelectorEventLoopPolicy())
+from asyncio.windows_events import WindowsSelectorEventLoopPolicy
+
+asyncio.set_event_loop_policy(WindowsSelectorEventLoopPolicy())
 
 # Set then check Update frequency for RTDE
 freq_dict = pu.get_frequencies()

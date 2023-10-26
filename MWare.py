@@ -9,6 +9,7 @@ import project_utils as pu
 
 # disable when running on Linux based systems
 from asyncio.windows_events import WindowsSelectorEventLoopPolicy
+
 asyncio.set_event_loop_policy(WindowsSelectorEventLoopPolicy())
 
 # Set then check Update frequency for Flask and OPCUA
@@ -20,8 +21,8 @@ opcua_per = freq_dict['opcua_per']
 def initialize_zmq_connections(context):
     to_bridge_socket = context.socket(zmq.PUB)
     from_bridge_socket = context.socket(zmq.SUB)
-    to_flask_socket = context.socket(zmq.PUB)
-    from_flask_socket = context.socket(zmq.SUB)
+    flask_polling = context.socket(zmq.REQ)
+    to_flask_update = context.socket(zmq.PUB)
     to_opcua_socket = context.socket(zmq.PUB)
     from_opcua_socket = context.socket(zmq.SUB)
     try:  # com with UR10e_bridge
@@ -32,9 +33,13 @@ def initialize_zmq_connections(context):
         sys.exit(f"\033[91mCan't connect to UR10e Bridge! {e}\033[0m")
 
     try:  # com with Flask Server
-        to_flask_socket.bind(f"tcp://{config.IP_MWARE}:{config.PORT_MW_F}")
-        from_flask_socket.bind(f"tcp://{config.IP_MWARE}:{config.PORT_F_MW}")
-        print('\033[32mFlask Server ports bound!\033[0m')
+        if config.ONLINE_MODE:
+            flask_polling.connect(f"tcp://{config.IP_FLASK_CLOUD}:{config.PORT_FLASK_POLL}")
+            to_flask_update.connect(f"tcp://{config.IP_FLASK_CLOUD}:{config.PORT_FLASK_UPDATE}")
+        else:
+            flask_polling.connect(f"tcp://{config.IP_FLASK_LOCAL}:{config.PORT_FLASK_POLL}")
+            to_flask_update.connect(f"tcp://{config.IP_FLASK_LOCAL}:{config.PORT_FLASK_UPDATE}")
+        print(f'\033[32mConnected to Flask Dummy on {config.IP_FLASK_LOCAL}!\033[0m')
     except Exception as e:
         sys.exit(f"\033[91mCan't connect to Flask Server! {e}\033[0m")
 
@@ -46,10 +51,10 @@ def initialize_zmq_connections(context):
         sys.exit(f"\033[91mCan't connect to OPCUA Server! {e}\033[0m")
 
     print(
-        f'Publish on port: {config.PORT_MW_F} & {config.PORT_MW_B} & {config.PORT_OP_MW}\n'
-        f'Listening on port: {config.PORT_F_MW} & {config.PORT_B_MW} & {config.PORT_MW_OP}')
+        f'Publish on port: {config.PORT_FLASK_POLL} & {config.PORT_MW_B} & {config.PORT_OP_MW}\n'
+        f'Listening on port: {str(8090)} & {config.PORT_B_MW} & {config.PORT_MW_OP}')
 
-    return to_opcua_socket, to_bridge_socket, to_flask_socket, from_bridge_socket, from_opcua_socket, from_flask_socket
+    return to_opcua_socket, to_bridge_socket, flask_polling, to_flask_update, from_bridge_socket, from_opcua_socket
 
 
 class UR10e:
@@ -135,42 +140,70 @@ class UR10e:
                         'standard_output_bits',
                         'configurable_output_bits',
                         'tool_output_bits'
-                        ]}      # add input bits when added to bridge
+                        ]}  # add input bits when added to bridge
+
 
 class FlaskHandler:
-    def __init__(self, to_flask, from_flask, to_bridge, local_ur):
+    def __init__(self, flask_polling, to_flask_update, to_bridge, local_ur):
         self.opcua_handler = None
-        self.to_flask_sock = to_flask
+        self.flask_polling = flask_polling
+        self.to_flask_update = to_flask_update
         self.to_bridge_sock = to_bridge
 
-        self.from_flask_sock = from_flask
-        self.from_flask_sock.setsockopt(zmq.SUBSCRIBE, b"Move_Command")
-        self.from_flask_sock.setsockopt(zmq.SUBSCRIBE, b"output_bit_command")
-        self.from_flask_sock.setsockopt(zmq.SUBSCRIBE, b"page_init")
-        self.from_flask_sock.setsockopt(zmq.SUBSCRIBE, b"switchControl")
+        # discard old REQs if a new one is sent out
+        self.flask_polling.setsockopt(zmq.REQ_RELAXED, 1)
 
         self.local_ur10e = local_ur
 
-        self.standby_period = 1             # for frequency of 1 Hz
-        self.flask_period = flask_per       # by default coming from project_utils.py
+        self.standby_period = 1  # for frequency of 1 Hz
+        self.flask_period = flask_per  # by default coming from project_utils.py
+
         # period between checking if standby or rtde period should be used in sending current states to Flask
         self.calculate_flask_frequency_period = 0.1
 
+        self.polling_reply_detected = False
+
     def set_cross_dependency(self, opcua_handler):
         self.opcua_handler = opcua_handler
+
+    async def polling_mechanism(self):
+        while True:
+            self.polling_reply_detected = False
+            try:
+                self.flask_polling.send(b'poll')
+            except zmq.ZMQError as e:
+                print(f"ZMQ Error: {e}")
+
+            timeout_counter = 0  # Initialize timeout counter
+            while not self.polling_reply_detected:
+                await asyncio.sleep(flask_per)
+
+                timeout_counter += flask_per  # Increment counter
+
+                if timeout_counter >= 1.0:  # If 1 second has passed
+                    print("Timeout reached, sending another poll.")
+                    try:
+                        # Reconnect logic
+                        if config.ONLINE_MODE:
+                            self.flask_polling.connect(f"tcp://{config.IP_FLASK_CLOUD}:{config.PORT_FLASK_POLL}")
+                        else:
+                            self.flask_polling.connect(f"tcp://{config.IP_FLASK_LOCAL}:{config.PORT_FLASK_POLL}")
+                    except Exception as e:
+                        print(f"Exception while resetting socket: {e}")
+                    break  # Exit the inner loop
 
     async def send(self):
         # send updates to Flask
         while True:
             serialized_message = None
 
-            if self.local_ur10e.control_mode == 0:      # flask
+            if self.local_ur10e.control_mode == 0:  # flask
                 serialized_message = json.dumps(self.local_ur10e.gather_to_send_current()).encode()
-            elif self.local_ur10e.control_mode == 1:    # opcua
+            elif self.local_ur10e.control_mode == 1:  # opcua
                 serialized_message = json.dumps(self.local_ur10e.gather_to_send_all()).encode()
 
             try:
-                await self.to_flask_sock.send_multipart([b"Joint_States", serialized_message])
+                await self.to_flask_update.send_multipart([b"Joint_States", serialized_message])
             except Exception as e:
                 print(f'Can not send update to Flask: {e}')
 
@@ -182,34 +215,36 @@ class FlaskHandler:
 
         # receive from Flask
         while True:
-                try:
-                    topic, serialized_message = await self.from_flask_sock.recv_multipart()
-                except Exception as e:
-                    print(e)
+            try:
+                topic, serialized_message = await self.flask_polling.recv_multipart()
+                self.polling_reply_detected = True
+            except Exception as e:
+                print(e)
 
-                if topic == b'Move_Command':
-                    # unpack and update local dataset
-                    self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
-                    message = json.loads(serialized_message.decode())
-                    print(f'debug: target tcp pose: {message}')
-                    # forward to bridge
-                    await self.to_bridge_sock.send_multipart([topic, serialized_message])
-                    print(f'debug: sent to bridge, STOP =  {self.local_ur10e.STOP}')
+            if topic == b'Move_Command':
+                # unpack and update local dataset
+                self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
+                message = json.loads(serialized_message.decode())
+                print(f'debug: target tcp pose: {message}')
+                # forward to bridge
+                await self.to_bridge_sock.send_multipart([topic, serialized_message])
+                print(f'debug: sent to bridge, STOP =  {self.local_ur10e.STOP}')
 
-                elif topic == b'output_bit_command':
-                    # unpack and update local dataset
-                    self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
-                    # forward to bridge
-                    await self.to_bridge_sock.send_multipart([topic, serialized_message])
+            elif topic == b'output_bit_command':
+                print('debug: output_bit_command arrived!')
+                # unpack and update local dataset
+                self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
+                # forward to bridge
+                await self.to_bridge_sock.send_multipart([topic, serialized_message])
 
-                elif topic == b"switchControl":
-                    # set local control_mode value to opcua
-                    self.local_ur10e.control_mode = json.loads(serialized_message.decode())
-                    print(f'local control_mode set to {self.local_ur10e.control_mode}')
+            elif topic == b"switchControl":
+                # set local control_mode value to opcua
+                self.local_ur10e.control_mode = json.loads(serialized_message.decode())
+                print(f'local control_mode set to {self.local_ur10e.control_mode}')
 
-                    # send control_mode update to OPCUA Server
-                    await self.opcua_handler.to_opcua_sock.send_multipart([b"switchControl", serialized_message])
-                    print(f'control_mode {self.local_ur10e.control_mode} sent to opcua server')
+                # send control_mode update to OPCUA Server
+                await self.opcua_handler.to_opcua_sock.send_multipart([b"switchControl", serialized_message])
+                print(f'control_mode {self.local_ur10e.control_mode} sent to opcua server')
 
     async def calculate_flask_frequency(self):
         while True:
@@ -218,8 +253,9 @@ class FlaskHandler:
             else:
                 self.flask_period = self.standby_period
 
-            print(f'flask period: {self.flask_period}')
+            # print(f'flask period: {self.flask_period}')
             await asyncio.sleep(self.calculate_flask_frequency_period)
+
 
 class OpcuaHandler:
     def __init__(self, to_opcua, from_opcua, to_bridge, local_ur):
@@ -242,7 +278,8 @@ class OpcuaHandler:
         serialized_message = None
         while True:
             if self.local_ur10e.control_mode == 0:  # flask
-                serialized_message = json.dumps(self.local_ur10e.gather_to_send_all()).encode()  # dictionary of robot attributes
+                serialized_message = json.dumps(
+                    self.local_ur10e.gather_to_send_all()).encode()  # dictionary of robot attributes
             elif self.local_ur10e.control_mode == 1:  # opcua
                 serialized_message = json.dumps(self.local_ur10e.gather_to_send_current()).encode()
 
@@ -279,7 +316,7 @@ class OpcuaHandler:
                 print(f'local control_mode set to {self.local_ur10e.control_mode}')
 
                 # send control_mode update to Flask Server
-                await self.flask_handler.to_flask_sock.send_multipart([b"switchControl", serialized_message])
+                await self.flask_handler.to_flask_update.send_multipart([b"switchControl", serialized_message])
                 print(f'control {self.local_ur10e.control_mode} sent to flask server')
 
 
@@ -289,30 +326,33 @@ async def receive_from_bridge(from_bridge_sock, local_ur10e):
         topic, serialized_message = await from_bridge_sock.recv_multipart()
         local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))  # blocking command
 
+context = zmq.asyncio.Context()
+
 async def main():
     local_ur10e = UR10e()
 
-    context = zmq.asyncio.Context()
     (to_opcua_socket,
      to_bridge_socket,
-     to_flask_socket,
+     flask_polling,
+     to_flask_update,
      from_bridge_socket,
-     from_opcua_socket,
-     from_flask_socket) = initialize_zmq_connections(context)
+     from_opcua_socket) = initialize_zmq_connections(context)
 
-    flask_handler = FlaskHandler(to_flask_socket, from_flask_socket, to_bridge_socket, local_ur10e)
+    flask_handler = FlaskHandler(flask_polling, to_flask_update, to_bridge_socket, local_ur10e)
     opcua_handler = OpcuaHandler(to_opcua_socket, from_opcua_socket, to_bridge_socket, local_ur10e)
 
     # set cross dependencies so flask and opcua handlers can use each other's methods
     flask_handler.set_cross_dependency(opcua_handler)
     opcua_handler.set_cross_dependency(flask_handler)
 
-    await asyncio.gather(flask_handler.send(),
+    await asyncio.gather(flask_handler.polling_mechanism(),
+                         flask_handler.send(),
                          flask_handler.receive(),
                          flask_handler.calculate_flask_frequency(),
                          opcua_handler.send(),
                          opcua_handler.receive(),
                          receive_from_bridge(from_bridge_socket, local_ur10e))
+
 
 if __name__ == "__main__":
     asyncio.run(main())
