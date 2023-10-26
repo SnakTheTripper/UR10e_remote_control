@@ -100,6 +100,8 @@
         let target_configurable_output_bits = []
         let target_tool_output_bits = []
 
+        let io_panel_state = 0
+
         var socket = io.connect('http://' + configData.ip_address_flask + ':' + configData.port_flask)
 
         function arraysEqual(a, b) {
@@ -218,10 +220,13 @@
             console.log(target_tool_output_bits)
         }
         function toggleIOControl() {
+            io_panel_state = io_panel_state === 0 ? 1 : 0;
+
             const ioControlDiv = document.getElementById("ioControl");
             const ioSendButton = document.getElementById("send_output_bits_button");
-            ioControlDiv.style.display = ioControlDiv.style.display === "none" ? "block" : "none";
-            ioSendButton.style.display = ioSendButton.style.display === "none" ? "block" : "none";
+            ioControlDiv.style.display = io_panel_state === 0 ? "block" : "none";
+            ioSendButton.style.display = io_panel_state === 0 ? "block" : "none";
+            socket.emit('button_press', {action: 'toggleIoPanel', io_panel_state: io_panel_state})
         }
         function handleSend() {
             const jp = [];
@@ -370,8 +375,14 @@
             updateValue(speedSlider, 'joint_speed_box')
             updateValue(accelSlider, 'joint_accel_box')
 
-            // initialize program list
-            updateTable(program_list)
+            // initialize IO panel state
+            io_panel_state = data.io_panel_state
+
+            const ioControlDiv = document.getElementById("ioControl");
+            const ioSendButton = document.getElementById("send_output_bits_button");
+            ioControlDiv.style.display = io_panel_state === 0 ? "block" : "none";
+            ioSendButton.style.display = io_panel_state === 0 ? "block" : "none";
+            socket.emit('button_press', {action: 'toggleIoPanel', io_panel_state: io_panel_state})
 
             // initialize IO table
             let initial_standard_input_bits = data.standard_input_bits
@@ -410,6 +421,9 @@
                 tool_input_bits.innerText = initial_tool_input_bits[i]
 
             }
+
+            // initialize program list
+            updateTable(program_list)
         });
 
         socket.on('updateTable', function(data) {
@@ -588,7 +602,7 @@
             </tr>
         </table>
         <div style="display: flex; justify-content: flex-end">
-            <button type="button" onclick="toggleIOControl()">Toggle I/O Control</button>
+            <button type="button" onclick="toggleIOControl()">I/O Control</button>
         </div>
         <div id="ioControl" style="display: none">
             <table class="io_table">
@@ -711,6 +725,9 @@
                     </tr>
                 </tbody>
               </table>
+        </div>
+        <div style="display: flex; justify-content: flex-end">
+            <button id="send_output_bits_button" type="button" onclick="sendOutputBits()" style="display: none">Send Output Bits</button>
         </div>
         <br>
         <div class="center-container">
