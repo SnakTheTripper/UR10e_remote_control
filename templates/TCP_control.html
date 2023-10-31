@@ -1,8 +1,27 @@
 <!DOCTYPE html>
 <!--<html xmlns="http://www.w3.org/1999/html">-->
 <head>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
     <title>UR10 TCP Controller</title>
     <style>
+        button {
+            font-family: 'Roboto Mono', monospace;
+            font-size: 15px;
+            padding: 3px 10px;
+            margin: 2px;
+            cursor: pointer;
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0px 8px 15px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease 0s;
+        }
+        button:hover {
+            background-color: #34495e;
+            box-shadow: 0px 15px 20px rgba(0, 0, 0, 0.4);
+            transform: translateY(-3px);
+        }
         .top-button-row {
             display: flex;
             justify-content: space-between;
@@ -10,36 +29,85 @@
         .center-container {
             display: flex;
             justify-content: center;
+            font-family: 'Roboto Mono', monospace;
+        }
+        .section-header {
+            text-align: center;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 24px;  /* adjust as needed */
+        }
+        .unit {
+            display: block;  /* makes it appear on the next line */
+            font-size: 14px;  /* smaller font size */
+            font-style: italic;  /* italicize for emphasis */
+            margin-top: -5px;  /* adjust to align better with the main text */
         }
         .tcp-row {
             width: 700px;
             display: grid;
-            grid-template-columns: 1fr 0.5fr 2fr 0.5fr; /* Adjust these fractions based on your needs */
-            grid-gap: 16px; /* Space between each cell */
+            grid-template-columns: 1fr 0.5fr 2fr 0.5fr;
+            grid-gap: 16px;
             text-align: center;
-            border: 1px solid #000;
+            align-items: center;
+            border: 2px solid #2c3e50; /* Dark Blue-Gray to match your buttons */
+            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);  /* Adds a soft shadow */
             padding: 8px;
+            transition: all 0.3s ease; /* For hover effect */
+            /* ...existing styles... */
+            border-top: none;  /* Remove top border for all but the first row */
+        }
+
+        /* Target the first row */
+        .tcp-row:first-child {
+            border-top-left-radius: 12px;  /* Rounded corners on the top left */
+            border-top-right-radius: 12px; /* Rounded corners on the top right */
+            border-top: 2px solid #2c3e50;  /* Add back the top border for the first row */
+        }
+
+        /* Target the last row */
+        .tcp-row:last-child {
+            border-bottom-left-radius: 12px;  /* Rounded corners on the bottom left */
+            border-bottom-right-radius: 12px; /* Rounded corners on the bottom right */
+        }
+
+        .tcp-row:hover {
+            background-color: rgba(44, 62, 80, 0.1);  /* Slight color change on hover */
         }
         .io-row {
             width: 700px;
             display: grid;
-            grid-template-columns: 5fr 8fr 8fr 2fr; /* Adjust these fractions based on your needs */
-            grid-gap: 4px; /* Space between each cell */
+            grid-template-columns: 5fr 8fr 8fr 2fr;
+            grid-gap: 16px;  /* Slightly increase the gap */
             text-align: center;
-            border: 1px solid #000;
+            align-items: center;  /* Vertically center the items */
+            border: 2px solid #2c3e50;  /* Dark Blue-Gray to match your other tables */
+            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);  /* Adds a soft shadow */
             padding: 8px;
+            transition: all 0.3s ease;  /* For hover effect */
+            border-top: none;  /* Remove top border for all but the first row */
         }
-        .parameter_row {
-            width: 700px;
-            display: grid;
-            grid-template-columns: 1fr 0.5fr 2fr 0.5fr; /* Adjust these fractions based on your needs */
-            grid-gap: 16px; /* Space between each cell */
-            text-align: center;
-            border: 1px solid #000;
-            padding: 8px;
+
+        /* For the first and last row */
+        .io-row:first-child {
+            border-top-left-radius: 12px;
+            border-top-right-radius: 12px;
+            border-top: 2px solid #2c3e50;  /* Add back the top border for the first row */
         }
+        .io-row:last-child {
+            border-bottom-left-radius: 12px;  /* Rounded corners on the bottom left */
+            border-bottom-right-radius: 12px; /* Rounded corners on the bottom right */
+        }
+
+        /* For hover effect */
+        .io-row:hover {
+            background-color: rgba(44, 62, 80, 0.1);  /* Slight color change on hover */
+        }
+
         .tcp-slider-wrapper {
             position: relative;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
         .current-slider, .target-slider {
             position: absolute;
@@ -54,22 +122,192 @@
         .target-slider {
             z-index: 2;
         }
-        .waypoint-table-header {
+        .waypoint-table-header,
+        .waypoint-table-row {
             width: 700px;
             display: grid;
-            grid-template-columns: 1fr 2fr 1fr 1fr; /* Adjust these fractions based on your needs */
-            grid-gap: 16px; /* Space between each cell */
+            grid-template-columns: 1fr 2fr 1fr 1fr;
+            grid-gap: 16px;
             text-align: center;
-            border: 1px solid #000;
+            border: 2px solid #2c3e50;
+            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
             padding: 8px;
+            transition: all 0.3s ease;
+            border-top: none;
         }
-        .waypoint-table-row {
-            display: grid;
-            grid-template-columns: 1fr 2fr 1fr 1fr; /* Adjust these fractions based on your needs */
-            grid-gap: 16px; /* Space between each cell */
+
+        .waypoint-table-header:first-child {
+            border-top-left-radius: 12px;
+            border-top-right-radius: 12px;
+            border-top: 2px solid #2c3e50;
+        }
+
+        .waypoint-table-row:last-child {
+            border-bottom-left-radius: 12px;
+            border-bottom-right-radius: 12px;
+        }
+
+        .waypoint-table-row:hover {
+            background-color: rgba(44, 62, 80, 0.1);
+        }
+
+
+
+        /*********** Baseline, reset styles ***********/
+        input[type="range"] {
+          -webkit-appearance: none;
+          appearance: none;
+          background: transparent;
+          cursor: pointer;
+          width: 250px;
+        }
+
+        /* Removes default focus */
+        input[type="range"]:focus {
+          outline: none;
+        }
+
+        /******** Chrome, Safari, Opera and Edge Chromium styles ********/
+        /* slider track */
+        input[type="range"]::-webkit-slider-runnable-track {
+          background-color: #9fc5e0;
+          border-radius: 12.5px;
+          height: 10px;
+        }
+
+        /* slider thumb */
+        input[type="range"]::-webkit-slider-thumb {
+          -webkit-appearance: none; /* Override default look */
+          appearance: none;
+          margin-top: -4px; /* Centers thumb on the track */
+          background-color: #6e6e6e;
+          border-radius: 10px;
+          height: 18px;
+          width: 18px;
+        }
+
+        input[type="range"]:focus::-webkit-slider-thumb {
+          outline: 3px solid #6e6e6e;
+          outline-offset: 0.125rem;
+        }
+
+        /*********** Firefox styles ***********/
+        /* slider track */
+        input[type="range"]::-moz-range-track {
+          background-color: #9fc5e0;
+          border-radius: 12.5px;
+          height: 10px;
+        }
+
+        /* slider thumb */
+        input[type="range"]::-moz-range-thumb {
+          background-color: #6e6e6e;
+          border: none; /*Removes extra border that FF applies*/
+          border-radius: 10px;
+          height: 18px;
+          width: 18px;
+        }
+
+        input[type="range"]:focus::-moz-range-thumb{
+          outline: 3px solid #6e6e6e;
+          outline-offset: 0.125rem;
+        }
+
+
+
+        .indicator {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
             text-align: center;
-            border: 1px solid #000;
-            padding: 4px;
+            line-height: 20px;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+
+        .indicator.zero {
+            background-color: #f1f1f1; /* Gray for 0 */
+            color: #fff;
+        }
+
+        .indicator.one {
+            background-color: #2c3e50; /* Blue for 1 */
+            color: #fff;
+        }
+
+
+
+        .indicator {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 20px;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+
+        .indicator.zero {
+            background-color: #f1f1f1; /* Gray for 0 */
+            color: #fff;
+        }
+
+        .indicator.one {
+            background-color: #2c3e50; /* Blue for 1 */
+            color: #fff;
+        }
+
+
+
+        /* Hide default checkbox */
+        input[type="checkbox"] {
+            display: none;
+        }
+
+        /* Create a custom checkbox */
+        input[type="checkbox"] + label {
+            display: inline-block;
+            width: 20px;  /* Outer diameter */
+            height: 20px;  /* Outer diameter */
+            border-radius: 50%;
+            position: relative;
+            background-color: #f1f1f1;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            border: 2px solid transparent;  /* Add this */
+        }
+
+        /* Create the check indicator */
+        input[type="checkbox"] + label:after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 10px;  /* Inner diameter */
+            height: 10px;  /* Inner diameter */
+            border-radius: 50%;
+            background-color: #2c3e50;
+            opacity: 0;
+            transition: opacity 0.3s, transform 0.3s;
+            transform: translate(-50%, -50%) scale(0);
+        }
+
+        /* Checkbox checked state */
+        input[type="checkbox"]:checked + label {
+            background-color: #2c3e50;
+            border: 2px solid #2c3e50;  /* Match the background color */
+        }
+
+        input[type="checkbox"]:checked + label:after {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        /* Checkbox unchecked state */
+        input[type="checkbox"]:not(:checked) + label {
+            border: 2px solid #1d2a38;  /* Add this */
         }
 
     </style>
@@ -86,7 +324,8 @@
         const tcpLimitsUpper = configData.tcp_limits_upper;
         const homePositionJoint = configData.home_position_joint
         const homePositionTCP = configData.home_position_tcp
-        // console.log(homePosition)
+
+        let current_tcp_positions = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
         let standard_input_bits = []
         let configurable_input_bits = []
@@ -98,6 +337,8 @@
         let target_standard_output_bits = []
         let target_configurable_output_bits = []
         let target_tool_output_bits = []
+
+        let io_panel_state = 0
 
         var socket = io.connect('http://' + configData.ip_address_flask + ':' + configData.port_flask)
 
@@ -147,13 +388,12 @@
         }
         function updateValue(slider, output) {
             const degrees = parseFloat(slider.value);
-            document.getElementById(output).innerText = degrees.toFixed(2); // Display as degrees with 2 decimal places
+            document.getElementById(output).innerText = degrees.toFixed(1); // Display as degrees with 2 decimal places
         }
-        function updateCurrentPosition(joint, position) {
-            const slider = document.getElementById(`current_tcp_${joint}`);
-            slider.value = position;
-            updateValue(slider, `current_tcp_${joint}`);
-            document.getElementById(`current_tcp_box_${joint}`).innerText = position.toFixed(2);
+        function updateCurrentPosition(id, value) {
+            const slider = document.getElementById(`current_tcp_${id}`);
+            slider.value = value;
+            document.getElementById(`current_tcp_box_${id}`).innerText = value.toFixed(1);
         }
         function setSliderLimits() {
             for (let i = 0; i < 6; i++) {
@@ -216,10 +456,13 @@
             console.log(target_tool_output_bits)
         }
         function toggleIOControl() {
+            io_panel_state = io_panel_state === 0 ? 1 : 0;
+
             const ioControlDiv = document.getElementById("ioControl");
             const ioSendButton = document.getElementById("send_output_bits_button");
-            ioControlDiv.style.display = ioControlDiv.style.display === "none" ? "block" : "none";
-            ioSendButton.style.display = ioSendButton.style.display === "none" ? "block" : "none";
+            ioControlDiv.style.display = io_panel_state === 0 ? "block" : "none";
+            ioSendButton.style.display = io_panel_state === 0 ? "block" : "none";
+            socket.emit('button_press', {action: 'toggleIoPanel', io_panel_state: io_panel_state})
         }
         function handleSend() {
             const tcp_p = [];
@@ -350,7 +593,7 @@
                 const tcpSlider = document.getElementById(`target_tcp_${i}`);
                 tcpSlider.value = current_tcp_pos[i];
                 currentTcpSlider.value = current_tcp_pos[i];
-                updateValue(tcpSlider, `current_tcp_box_${i}`);
+                document.getElementById(`current_tcp_box_${i}`).innerText = current_tcp_pos[i].toFixed(1); // Display as degrees with 2 decimal places
                 updateValue(tcpSlider, `target_tcp_box_${i}`);
             }
 
@@ -365,8 +608,14 @@
             updateValue(speedSlider, 'tcp_speed_box')
             updateValue(accelSlider, 'tcp_accel_box')
 
-            // initialize program list
-            updateTable(program_list)
+            // initialize IO panel state
+            io_panel_state = data.io_panel_state
+
+            const ioControlDiv = document.getElementById("ioControl");
+            const ioSendButton = document.getElementById("send_output_bits_button");
+            ioControlDiv.style.display = io_panel_state === 0 ? "block" : "none";
+            ioSendButton.style.display = io_panel_state === 0 ? "block" : "none";
+            socket.emit('button_press', {action: 'toggleIoPanel', io_panel_state: io_panel_state})
 
             // initialize IO table
             let initial_standard_input_bits = data.standard_input_bits
@@ -384,27 +633,32 @@
                 target_standard_output_bits_checkbox.checked = (target_standard_output_bits[i] === 1);
                 target_configurable_output_bits_checkbox.checked = (target_configurable_output_bits[i] === 1);
 
-                const standard_output_bits = document.getElementById(`standard_output_bit_${i}`)
-                const configurable_output_bits = document.getElementById(`configurable_output_bit_${i}`)
-                standard_output_bits.innerText = target_standard_output_bits[i]
-                configurable_output_bits.innerText = target_configurable_output_bits[i]
+                // update standard and configurable I/O indicators
+                const standard_input_bit_indicator = document.getElementById(`standard_input_bit_${i}`)
+                const configurable_input_bit_indicator = document.getElementById(`configurable_input_bit_${i}`)
+                const standard_output_bit_indicator = document.getElementById(`standard_output_bit_${i}`)
+                const configurable_output_bit_indicator = document.getElementById(`configurable_output_bit_${i}`)
 
-                const standard_input_bits = document.getElementById(`standard_input_bit_${i}`)
-                const configurable_input_bits = document.getElementById(`configurable_input_bit_${i}`)
-                standard_input_bits.innerText = initial_standard_input_bits[i]
-                configurable_input_bits.innerText = initial_configurable_input_bits[i]
+                standard_input_bit_indicator.className = standard_input_bits[i] === 1 ? "indicator one" : "indicator zero"
+                configurable_input_bit_indicator.className = configurable_input_bits[i] === 1 ? "indicator one" : "indicator zero"
+                standard_output_bit_indicator.className = standard_output_bits[i] === 1 ? "indicator one" : "indicator zero"
+                configurable_output_bit_indicator.className = configurable_output_bits[i] === 1 ? "indicator one" : "indicator zero"
             }
             for (let i = 0 ; i < 2 ; i++) {
                 const target_tool_output_bits_checkbox = document.getElementById(`target_tool_output_bit_${i}`)
                 target_tool_output_bits_checkbox.checked = (target_tool_output_bits[i] === 1);
 
-                const tool_output_bits = document.getElementById(`tool_output_bit_${i}`)
-                tool_output_bits.innerText = target_tool_output_bits[i]
+                // update tool I/O bit indicators
+                const tool_input_bit_indicator = document.getElementById(`tool_input_bit_${i}`)
+                const tool_output_bit_indicator = document.getElementById(`tool_output_bit_${i}`)
 
-                const tool_input_bits = document.getElementById(`tool_input_bit_${i}`)
-                tool_input_bits.innerText = initial_tool_input_bits[i]
+                tool_input_bit_indicator.className = tool_input_bits[i] === 1 ? "indicator one" : "indicator zero"
+                tool_output_bit_indicator.className = tool_output_bits[i] === 1 ? "indicator one" : "indicator zero"
 
             }
+
+            // initialize program list
+            updateTable(program_list)
         });
 
         socket.on('updateTable', function(data) {
@@ -453,10 +707,14 @@
             });
         }
         socket.on('update_current_positions', function(data) {
-            const positions = data.current_tcp;
-            // console.log(positions);
+            const prev_tcp_positions = current_tcp_positions
+            current_tcp_positions = data.current_tcp;
+            // console.log(current_tcp_positions);
+
             for (let i = 0; i < 6; i++) {
-                updateCurrentPosition(i, positions[i]);
+                if (parseFloat(current_tcp_positions[i].toFixed(1)) != parseFloat(prev_tcp_positions[i].toFixed(1))) {
+                    updateCurrentPosition(i, current_tcp_positions[i]);
+                }
             }
         });
         socket.on('update_current_IO', function (data) {
@@ -488,17 +746,19 @@
                     const configurable_input_bit_indicator = document.getElementById(`configurable_input_bit_${i}`)
                     const standard_output_bit_indicator = document.getElementById(`standard_output_bit_${i}`)
                     const configurable_output_bit_indicator = document.getElementById(`configurable_output_bit_${i}`)
-                    standard_input_bit_indicator.innerText = standard_input_bits[i]
-                    configurable_input_bit_indicator.innerText = configurable_input_bits[i]
-                    standard_output_bit_indicator.innerText = standard_output_bits[i]
-                    configurable_output_bit_indicator.innerText = configurable_output_bits[i]
+
+                    standard_input_bit_indicator.className = standard_input_bits[i] === 1 ? "indicator one" : "indicator zero"
+                    configurable_input_bit_indicator.className = configurable_input_bits[i] === 1 ? "indicator one" : "indicator zero"
+                    standard_output_bit_indicator.className = standard_output_bits[i] === 1 ? "indicator one" : "indicator zero"
+                    configurable_output_bit_indicator.className = configurable_output_bits[i] === 1 ? "indicator one" : "indicator zero"
                 }
                 for (let i = 0; i < 2; i++) {
                     // update tool I/O bit indicators
                     const tool_input_bit_indicator = document.getElementById(`tool_input_bit_${i}`)
                     const tool_output_bit_indicator = document.getElementById(`tool_output_bit_${i}`)
-                    tool_input_bit_indicator.innerText = tool_input_bits[i]
-                    tool_output_bit_indicator.innerText = tool_output_bits[i]
+
+                    tool_input_bit_indicator.className = tool_input_bits[i] === 1 ? "indicator one" : "indicator zero"
+                    tool_output_bit_indicator.className = tool_output_bits[i] === 1 ? "indicator one" : "indicator zero"
                 }
             }
         })
@@ -519,6 +779,9 @@
 
             }
         })
+        socket.on('not_the_active_controller', function() {
+            alert('OPCUA is in control!')
+        });
 
         // keep alive
 
@@ -532,59 +795,63 @@
         setInterval(keepAlive, 5000)
     </script>
 </head>
-<body class="center-container">
+<body class="center-container" style="background-color: #eaf4f9">
     <form action="/" method="post">
         <div class="top-button-row">
-            <button type="button" onclick="goToJoint()">Switch to JOINT Control</button>
+            <div style="width: 200px; display: flex; justify-content: flex-start;">
+                <button type="button" onclick="goToJoint()">JOINT Control</button>
+            </div>
             <button type="button" onclick="switchControl()" id="switchControlButton">Switch Control Mode</button>
-            <button type="button" style="text-align: right" onclick="goToHome()">Home Page</button>
+            <div style="width: 200px; display: flex; justify-content: flex-end;">
+                <button type="button" onclick="goToHome()">Home Page</button>
+            </div>
         </div>
         <br>
         <table>
-            <caption>TCP Control</caption>
+            <caption>
+                <div class="section-header">
+                    <span>TCP Control</span>
+                    <span class="unit">millimeters</span>
+                </div>
+            </caption>
             {% set row_names = ['TCP X:', 'TCP Y:', 'TCP Z:', 'TCP Roll:', 'TCP Pitch:', 'TCP Yaw:'] %}
             {% for i in range(6) %}
-                <tr class="tcp-row" , style="text-align: center">
+                <tr class="tcp-row">
                     <th scope="row"><label>{{ row_names[i] }}</label></th>
                     <td><span id="current_tcp_box_{{ i }}">0.00</span></td>
                     <td class="tcp-slider-wrapper">
-                        <div style="display: flex; justify-content: space-between;">
-                            <button type="button" onclick="decreaseSlider('target_tcp_{{ i }}')">-</button>
-                            <input type="range" id="target_tcp_{{ i }}" name="target_tcp_{{ i }}" class="target-slider" min="-360" max="360" step="1" value="{{ request.form['target_tcp_' ~ i] }}" oninput="updateValue(this, 'target_tcp_box_{{ i }}')">
-                            <input type="range" id="current_tcp_{{ i }}" name="current_tcp_{{ i }}" class="current-slider" min="-360" max="360" step="1">
-                            <button type="button" onclick="increaseSlider('target_tcp_{{ i }}')">+</button>
-                        </div>
+                        <button type="button" onclick="decreaseSlider('target_tcp_{{ i }}')">-</button>
+                        <input type="range" id="target_tcp_{{ i }}" name="target_tcp_{{ i }}" class="target-slider" min="-360" max="360" step="1" value="{{ request.form['target_tcp_' ~ i] }}" oninput="updateValue(this, 'target_tcp_box_{{ i }}')">
+                        <input type="range" id="current_tcp_{{ i }}" name="current_tcp_{{ i }}" class="current-slider" min="-360" max="360" step="1">
+                        <button type="button" onclick="increaseSlider('target_tcp_{{ i }}')">+</button>
                     </td>
-                    <td style="text-align: center"><span id="target_tcp_box_{{ i }}">0.00</span></td>
+                    <td><span id="target_tcp_box_{{ i }}">0.00</span></td>
                 </tr>
             {% endfor %}
-            <tr class="parameter_row">
-                <th scope="row" style="text-align: center"><label> Speed (m/s):</label></th>
-                <td></td>
+        </table>
+        <table>
+            <tr class="tcp-row">
+                <th scope="row"><label> Speed:</label></th>
+                <td class="unit" style="font-size: 16px">m/s</td>
                 <td class="tcp-slider-wrapper" >
-                    <div style="display: flex; justify-content: space-between">
-                        <button type="button" onclick="decreaseSlider('tcp_speed')">-</button>
-                        <input type="range" class="target-slider" id="tcp_speed" name="tcp_speed" min="0.1" max="3" step="0.1" value="{{ request.form['tcp_speed']|default('0.1') }}" oninput="updateValue(this, 'tcp_speed_box')">
-                        <button type="button" onclick="increaseSlider('tcp_speed')">+</button>
-                    </div>
+                    <button type="button" onclick="decreaseSlider('tcp_speed')">-</button>
+                    <input type="range" class="target-slider" id="tcp_speed" name="tcp_speed" min="0.1" max="3" step="0.1" value="{{ request.form['tcp_speed']|default('0.1') }}" oninput="updateValue(this, 'tcp_speed_box')">
+                    <button type="button" onclick="increaseSlider('tcp_speed')">+</button>
                 </td>
                 <td><span id="tcp_speed_box">0.00</span></td>
             </tr>
-            <tr class="parameter_row">
-                <th scope="row" style="text-align: center"><label> Acceleration (m/s^2):</label></th>
-                <td></td>
+            <tr class="tcp-row">
+                <th scope="row"><label> Acceleration:</label></th>
+                <td class="unit" style="font-size: 16px">m/s<sup>2</sup></td>
                 <td class="tcp-slider-wrapper">
-                    <div style="display: flex; justify-content: space-between">
-                        <button type="button" onclick="decreaseSlider('tcp_accel')">-</button>
-                        <input type="range" class="target-slider" id="tcp_accel" name="tcp_accel" min="0.1" max="3" step="0.1" value="{{ request.form['tcp_accel']|default('0.1') }}" oninput="updateValue(this, 'tcp_accel_box')">
-                        <button type="button" onclick="increaseSlider('tcp_accel')">+</button>
-                    </div>
+                    <button type="button" onclick="decreaseSlider('tcp_accel')">-</button>
+                    <input type="range" class="target-slider" id="tcp_accel" name="tcp_accel" min="0.1" max="3" step="0.1" value="{{ request.form['tcp_accel']|default('0.1') }}" oninput="updateValue(this, 'tcp_accel_box')">
+                    <button type="button" onclick="increaseSlider('tcp_accel')">+</button>
                 <td><span id="tcp_accel_box">0.00</span></td>
             </tr>
         </table>
         <div style="display: flex; justify-content: flex-end">
-            <button id="send_output_bits_button" type="button" onclick="sendOutputBits()" style="display: none">Send Output Bits</button>
-            <button type="button" onclick="toggleIOControl()">Toggle I/O Control</button>
+            <button type="button" onclick="toggleIOControl()">I/O Control</button>
         </div>
         <div id="ioControl" style="display: none">
             <table class="io_table">
@@ -627,86 +894,143 @@
                     <tr class="io-row" id="input_bits_row">
                         <td>Input Bits</td>
                         <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
-                            <div><span id="standard_input_bit_0">0</span></div>
-                            <div><span id="standard_input_bit_1">0</span></div>
-                            <div><span id="standard_input_bit_2">0</span></div>
-                            <div><span id="standard_input_bit_3">0</span></div>
-                            <div><span id="standard_input_bit_4">0</span></div>
-                            <div><span id="standard_input_bit_5">0</span></div>
-                            <div><span id="standard_input_bit_6">0</span></div>
-                            <div><span id="standard_input_bit_7">0</span></div>
+                            <div><span class="indicator" id="standard_input_bit_0"></span></div>
+                            <div><span class="indicator" id="standard_input_bit_1"></span></div>
+                            <div><span class="indicator" id="standard_input_bit_2"></span></div>
+                            <div><span class="indicator" id="standard_input_bit_3"></span></div>
+                            <div><span class="indicator" id="standard_input_bit_4"></span></div>
+                            <div><span class="indicator" id="standard_input_bit_5"></span></div>
+                            <div><span class="indicator" id="standard_input_bit_6"></span></div>
+                            <div><span class="indicator" id="standard_input_bit_7"></span></div>
                         </td>
                         <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
-                            <div><span id="configurable_input_bit_0">0</span></div>
-                            <div><span id="configurable_input_bit_1">0</span></div>
-                            <div><span id="configurable_input_bit_2">0</span></div>
-                            <div><span id="configurable_input_bit_3">0</span></div>
-                            <div><span id="configurable_input_bit_4">0</span></div>
-                            <div><span id="configurable_input_bit_5">0</span></div>
-                            <div><span id="configurable_input_bit_6">0</span></div>
-                            <div><span id="configurable_input_bit_7">0</span></div>
+                            <div><span class="indicator" id="configurable_input_bit_0"></span></div>
+                            <div><span class="indicator" id="configurable_input_bit_1"></span></div>
+                            <div><span class="indicator" id="configurable_input_bit_2"></span></div>
+                            <div><span class="indicator" id="configurable_input_bit_3"></span></div>
+                            <div><span class="indicator" id="configurable_input_bit_4"></span></div>
+                            <div><span class="indicator" id="configurable_input_bit_5"></span></div>
+                            <div><span class="indicator" id="configurable_input_bit_6"></span></div>
+                            <div><span class="indicator" id="configurable_input_bit_7"></span></div>
                         </td>
                         <td style="display: grid; grid-template-columns: 1fr 1fr">
-                            <div><span id="tool_input_bit_0">0</span></div>
-                            <div><span id="tool_input_bit_1">0</span></div>
+                            <div><span class="indicator" id="tool_input_bit_0"></span></div>
+                            <div><span class="indicator" id="tool_input_bit_1"></span></div>
                         </td>
                     </tr>
                     <tr class="io-row" id="output_bits_row">
                         <td>Output Bits</td>
                         <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
-                            <div><span id="standard_output_bit_0">0</span></div>
-                            <div><span id="standard_output_bit_1">0</span></div>
-                            <div><span id="standard_output_bit_2">0</span></div>
-                            <div><span id="standard_output_bit_3">0</span></div>
-                            <div><span id="standard_output_bit_4">0</span></div>
-                            <div><span id="standard_output_bit_5">0</span></div>
-                            <div><span id="standard_output_bit_6">0</span></div>
-                            <div><span id="standard_output_bit_7">0</span></div>
+                            <div><span class="indicator" id="standard_output_bit_0"></span></div>
+                            <div><span class="indicator" id="standard_output_bit_1"></span></div>
+                            <div><span class="indicator" id="standard_output_bit_2"></span></div>
+                            <div><span class="indicator" id="standard_output_bit_3"></span></div>
+                            <div><span class="indicator" id="standard_output_bit_4"></span></div>
+                            <div><span class="indicator" id="standard_output_bit_5"></span></div>
+                            <div><span class="indicator" id="standard_output_bit_6"></span></div>
+                            <div><span class="indicator" id="standard_output_bit_7"></span></div>
                         </td>
                         <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
-                            <div><span id="configurable_output_bit_0">0</span></div>
-                            <div><span id="configurable_output_bit_1">0</span></div>
-                            <div><span id="configurable_output_bit_2">0</span></div>
-                            <div><span id="configurable_output_bit_3">0</span></div>
-                            <div><span id="configurable_output_bit_4">0</span></div>
-                            <div><span id="configurable_output_bit_5">0</span></div>
-                            <div><span id="configurable_output_bit_6">0</span></div>
-                            <div><span id="configurable_output_bit_7">0</span></div>
+                            <div><span class="indicator" id="configurable_output_bit_0"></span></div>
+                            <div><span class="indicator" id="configurable_output_bit_1"></span></div>
+                            <div><span class="indicator" id="configurable_output_bit_2"></span></div>
+                            <div><span class="indicator" id="configurable_output_bit_3"></span></div>
+                            <div><span class="indicator" id="configurable_output_bit_4"></span></div>
+                            <div><span class="indicator" id="configurable_output_bit_5"></span></div>
+                            <div><span class="indicator" id="configurable_output_bit_6"></span></div>
+                            <div><span class="indicator" id="configurable_output_bit_7"></span></div>
                         </td>
                         <td style="display: grid; grid-template-columns: 1fr 1fr">
-                            <div><span id="tool_output_bit_0">0</span></div>
-                            <div><span id="tool_output_bit_1">0</span></div>
+                            <div><span class="indicator" id="tool_output_bit_0"></span></div>
+                            <div><span class="indicator" id="tool_output_bit_1"></span></div>
                         </td>
                     </tr>
                     <tr class="io-row" id="target_output_bits_row">
                         <td>Target Output Bits</td>
                         <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
-                            <div><input type="checkbox" id="target_standard_output_bit_0"></div>
-                            <div><input type="checkbox" id="target_standard_output_bit_1"></div>
-                            <div><input type="checkbox" id="target_standard_output_bit_2"></div>
-                            <div><input type="checkbox" id="target_standard_output_bit_3"></div>
-                            <div><input type="checkbox" id="target_standard_output_bit_4"></div>
-                            <div><input type="checkbox" id="target_standard_output_bit_5"></div>
-                            <div><input type="checkbox" id="target_standard_output_bit_6"></div>
-                            <div><input type="checkbox" id="target_standard_output_bit_7"></div>
+                            <div>
+                                <input type="checkbox" id="target_standard_output_bit_0">
+                                <label for="target_standard_output_bit_0"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_standard_output_bit_1">
+                                <label for="target_standard_output_bit_1"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_standard_output_bit_2">
+                                <label for="target_standard_output_bit_2"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_standard_output_bit_3">
+                                <label for="target_standard_output_bit_3"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_standard_output_bit_4">
+                                <label for="target_standard_output_bit_4"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_standard_output_bit_5">
+                                <label for="target_standard_output_bit_5"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_standard_output_bit_6">
+                                <label for="target_standard_output_bit_6"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_standard_output_bit_7">
+                                <label for="target_standard_output_bit_7"></label>
+                            </div>
                         </td>
                         <td style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr">
-                            <div><input type="checkbox" id="target_configurable_output_bit_0"></div>
-                            <div><input type="checkbox" id="target_configurable_output_bit_1"></div>
-                            <div><input type="checkbox" id="target_configurable_output_bit_2"></div>
-                            <div><input type="checkbox" id="target_configurable_output_bit_3"></div>
-                            <div><input type="checkbox" id="target_configurable_output_bit_4"></div>
-                            <div><input type="checkbox" id="target_configurable_output_bit_5"></div>
-                            <div><input type="checkbox" id="target_configurable_output_bit_6"></div>
-                            <div><input type="checkbox" id="target_configurable_output_bit_7"></div>
+                            <div>
+                                <input type="checkbox" id="target_configurable_output_bit_0">
+                                <label for="target_configurable_output_bit_0"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_configurable_output_bit_1">
+                                <label for="target_configurable_output_bit_1"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_configurable_output_bit_2">
+                                <label for="target_configurable_output_bit_2"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_configurable_output_bit_3">
+                                <label for="target_configurable_output_bit_3"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_configurable_output_bit_4">
+                                <label for="target_configurable_output_bit_4"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_configurable_output_bit_5">
+                                <label for="target_configurable_output_bit_5"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_configurable_output_bit_6">
+                                <label for="target_configurable_output_bit_6"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_configurable_output_bit_7">
+                                <label for="target_configurable_output_bit_7"></label>
+                            </div>
                         </td>
                         <td style="display: grid; grid-template-columns: 1fr 1fr">
-                            <div><input type="checkbox" id="target_tool_output_bit_0"></div>
-                            <div><input type="checkbox" id="target_tool_output_bit_1"></div>
+                            <div>
+                                <input type="checkbox" id="target_tool_output_bit_0">
+                                <label for="target_tool_output_bit_0"></label>
+                            </div>
+                            <div>
+                                <input type="checkbox" id="target_tool_output_bit_1">
+                                <label for="target_tool_output_bit_1"></label>
+                            </div>
                         </td>
                     </tr>
                 </tbody>
               </table>
+        </div>
+        <div style="display: flex; justify-content: flex-end">
+            <button id="send_output_bits_button" type="button" onclick="sendOutputBits()" style="display: none">Send Output Bits</button>
         </div>
         <br>
         <div class="center-container">
@@ -715,9 +1039,9 @@
         </div>
         <br>
         <div class="center-container">
-            <button style="background-color: green; height: 50px; width: 100px; border-radius: 12px" type="button" onclick="handleSend()">SEND</button>
+            <button style="background-color: #28a745; border: 2px solid #2c3e50; height: 50px; width: 100px; border-radius: 12px; text-decoration-color: black" type="button" onclick="handleSend()">SEND</button>
             <div style="width: 50px;"></div> <!-- Empty element for spacing -->
-            <button style="background-color: crimson; height: 50px; width: 100px; border-radius: 12px" type="button" onclick="handleStop()">STOP</button>
+            <button style="background-color: #dc3545; border: 2px solid #2c3e50; height: 50px; width: 100px; border-radius: 12px" type="button" onclick="handleStop()">STOP</button>
         </div>
         <br><br><br>        <!-- PROGRAM LIST -->
 

@@ -16,6 +16,10 @@ import project_utils as pu
 import ur10e_object
 from datetime import datetime
 
+# disable when running on Linux based systems
+from asyncio.windows_events import WindowsSelectorEventLoopPolicy
+asyncio.set_event_loop_policy(WindowsSelectorEventLoopPolicy())
+
 # Set then check Update frequency for OPCUA
 freq_dict = pu.get_frequencies()
 opcua_per = freq_dict['opcua_per']
