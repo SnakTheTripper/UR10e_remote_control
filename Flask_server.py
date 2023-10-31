@@ -1,14 +1,22 @@
 import json
+import cv2
 import sys
 import threading
 import time
 from queue import Queue
+import base64
+
+import numpy as np
 import zmq
 from flask import Flask, render_template, redirect
 from flask_socketio import SocketIO
 import config
 import project_utils as pu
 from waitress import serve
+import logging
+
+logging.basicConfig(level=logging.ERROR)
+
 
 # Set then check Update frequency for Flask
 freq_dict = pu.get_frequencies()
@@ -16,7 +24,8 @@ flask_per = freq_dict['flask_per']
 
 
 def gather_config_data_for_JavaScript():
-    return {'ip_address_flask': config.IP_FLASK_LOCAL,
+    actual_ip_flask = config.IP_FLASK_CLOUD if config.ONLINE_MODE else config.IP_FLASK_LOCAL
+    return {'ip_address_flask': actual_ip_flask,
             'port_flask': config.PORT_FLASK_WEB,
             'joint_limits_lower': config.joint_limits_lower,
             'joint_limits_upper': config.joint_limits_upper,
@@ -93,16 +102,19 @@ class UR10e:
 
 class MiddleWare:
     def __init__(self):
-        self.socket = socket
+        self.websocket = socket
         context = zmq.Context()
 
         self.polling_socket = context.socket(zmq.REP)
         self.update_socket = context.socket(zmq.SUB)
+        self.video_socket_1 = context.socket(zmq.SUB)
+        self.video_socket_2 = context.socket(zmq.SUB)
+        self.video_socket_3 = context.socket(zmq.SUB)
 
         self.topic = None
         self.received_message = None
 
-        self.web = WebMethods(self.socket)
+        self.web = WebMethods(self.websocket)
 
         self.connect_to_mw()
 
@@ -111,17 +123,23 @@ class MiddleWare:
         try:
             self.polling_socket.bind(f"tcp://*:{config.PORT_FLASK_POLL}")
             self.update_socket.bind(f"tcp://*:{config.PORT_FLASK_UPDATE}")
+            self.video_socket_1.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_1}")
+            self.video_socket_2.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_2}")
+            self.video_socket_3.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_3}")
 
-            self.update_socket.setsockopt(zmq.SUBSCRIBE, b"Joint_States")
-            self.update_socket.setsockopt(zmq.SUBSCRIBE, b"switchControl")
+            self.update_socket.setsockopt(zmq.SUBSCRIBE, b'Joint_States')
+            self.update_socket.setsockopt(zmq.SUBSCRIBE, b'switchControl')
+            self.video_socket_1.setsockopt_string(zmq.SUBSCRIBE, '')
+            self.video_socket_2.setsockopt_string(zmq.SUBSCRIBE, '')
+            self.video_socket_3.setsockopt_string(zmq.SUBSCRIBE, '')
 
             print(f'Bound ports {config.PORT_FLASK_POLL} & {config.PORT_FLASK_UPDATE} to listen to MW')
         except Exception as e:
-            sys.exit(f"Error with ports {config.PORT_F_MW} & {config.PORT_MW_F}: {e}")
+            sys.exit(f"Error with ports {config.PORT_FLASK_POLL}, {config.PORT_FLASK_UPDATE} or {config.PORT_FLASK_VIDEO_1}: {e}")
 
     def receive_polling(self):
         while True:
-            self.polling_socket.recv()
+            message = self.polling_socket.recv()
             # print(f"I got this message: {message.decode()}")
             buttons.process_queue()
 
@@ -140,7 +158,7 @@ class MiddleWare:
             elif self.topic == b"switchControl":
                 local_ur10e.control_mode = json.loads(self.received_message.decode())
                 print(f'local control_mode set by OPCUA to {local_ur10e.control_mode}')
-                self.socket.emit('update_control_mode', {'control_mode': local_ur10e.control_mode})
+                self.websocket.emit('update_control_mode', {'control_mode': local_ur10e.control_mode})
 
             if local_ur10e.control_mode == 0:  # flask
                 # update current, target is defined by web client
@@ -154,6 +172,54 @@ class MiddleWare:
                 self.web.update_current_IO()
                 self.web.update_target_IO()
 
+    def receive_video_feed_1(self):
+        frame_bytes = None
+        while True:
+            try:
+                # print('waiting for video feed')
+                # Receive frame bytes from MW with ZMQ
+                frame_bytes = self.video_socket_1.recv()
+            except Exception as e:
+                print(f"Error in receiving the video feed!: {e}")
+
+            if frame_bytes is not None:
+                base64_frame = base64.b64encode(frame_bytes).decode('utf-8')
+                self.websocket.emit('video_feed_1', {'image': f"data:image/jpeg;base64,{base64_frame}"})
+            else:
+                print("frame_bytes is None. Skipping...")
+
+    def receive_video_feed_2(self):
+        frame_bytes = None
+        while True:
+            try:
+                # print('waiting for video feed')
+                # Receive frame bytes from MW with ZMQ
+                frame_bytes = self.video_socket_2.recv()
+            except Exception as e:
+                print(f"Error in receiving the video feed!: {e}")
+
+            if frame_bytes is not None:
+                base64_frame = base64.b64encode(frame_bytes).decode('utf-8')
+                self.websocket.emit('video_feed_2', {'image': f"data:image/jpeg;base64,{base64_frame}"})
+            else:
+                print("frame_bytes is None. Skipping...")
+
+    def receive_video_feed_3(self):
+        frame_bytes = None
+        while True:
+            try:
+                # print('waiting for video feed')
+                # Receive frame bytes from MW with ZMQ
+                frame_bytes = self.video_socket_3.recv()
+            except Exception as e:
+                print(f"Error in receiving the video feed!: {e}")
+
+            if frame_bytes is not None:
+                base64_frame = base64.b64encode(frame_bytes).decode('utf-8')
+                self.websocket.emit('video_feed_3', {'image': f"data:image/jpeg;base64,{base64_frame}"})
+            else:
+                print("frame_bytes is None. Skipping...")
+
 
 class FlaskServer:
     def __init__(self):
@@ -164,7 +230,7 @@ class FlaskServer:
         return self.app
 
     def app_routes(self):
-        @self.app.route('/')
+        @self.app.route('/', methods=["GET", "POST"])
         def index():
             return redirect('/home')
 
@@ -174,18 +240,44 @@ class FlaskServer:
 
         @self.app.route('/joint_control')
         def JOINT_control_page():
-            print("JOINT CONTROL PAGE OPENED - Move Type set")
+            print("Joint Control Page Opened!")
             local_ur10e.move_type = 1  # moveJ
             config_data = gather_config_data_for_JavaScript()
             return render_template('JOINT_control.html', config_data=config_data)
 
         @self.app.route('/tcp_control')
         def TCP_control_page():
-            print("TCP CONTROL PAGE OPENED - Move Type set")
+            print("TCP Control Page Opened!")
             local_ur10e.move_type = 0  # moveL
             config_data = gather_config_data_for_JavaScript()
 
             return render_template('TCP_control.html', config_data=config_data)
+
+        @self.app.route('/video1')
+        def video_page_1():
+            print("Surveillance Video Page Opened! - 1")
+            config_data = gather_config_data_for_JavaScript()
+            return render_template('videos/video1.html', config_data=config_data)
+
+        @self.app.route('/video2')
+        def video_page_2():
+            print("Surveillance Video Page Opened! - 2")
+            config_data = gather_config_data_for_JavaScript()
+            return render_template('videos/video2.html', config_data=config_data)
+
+        @self.app.route('/video3')
+        def video_page_3():
+            print("Surveillance Video Page Opened! - 3")
+            config_data = gather_config_data_for_JavaScript()
+            return render_template('videos/video3.html', config_data=config_data)
+
+        @self.app.route('/video_all')
+        def video_page_all():
+            print("Surveillance Video Page Opened! - ALL")
+            config_data = gather_config_data_for_JavaScript()
+            return render_template('videos/video_all.html', config_data=config_data)
+
+
 
 
 class SocketIOEvents:
@@ -219,6 +311,10 @@ class SocketIOEvents:
                 self.buttons.switchControl()
             elif action == "toggleIoPanel":
                 self.toggleIoPanel(command_data)
+            elif action == "pauseVideo":
+                self.buttons.pause_video(command_data)
+            elif action == "resumeVideo":
+                self.buttons.play_video(command_data)
 
             # update program list with every button press
             self.socket.emit('updateTable', {'program_list': local_ur10e.program_list})
@@ -313,12 +409,15 @@ class Buttons:
         local_ur10e.target_configurable_output_bits = data["target_configurable_output_bits"]
         local_ur10e.target_tool_output_bits = data["target_tool_output_bits"]
 
-        # send newly updated targets to MW
-        message = local_ur10e.gather_to_send_output_bits()
-        serialized_message = json.dumps(message).encode()
-        self.message_queue.put([b"output_bit_command", serialized_message])
-        # send package to web clients, so it updates other clients too
-        self.web.update_target_IO()
+        # send newly updated targets to MW only if flask is the active controlle
+        if local_ur10e.control_mode == 0:   # flask
+            message = local_ur10e.gather_to_send_output_bits()
+            serialized_message = json.dumps(message).encode()
+            self.message_queue.put([b"output_bit_command", serialized_message])
+            # send package to web clients, so it updates other clients too
+            self.web.update_target_IO()
+        else:
+            socket.emit('not_the_active_controller')
 
     def sendButton(self, data):
         m_t = data["move_type"]  # comes with every SEND button press (1 from joint, 0 from TCP control webpage)
@@ -341,28 +440,32 @@ class Buttons:
         if local_ur10e.control_mode == 0:
             self.send_movement()
         elif local_ur10e.control_mode == 1:
+            socket.emit('not_the_active_controller')
             print('Control Mode is set to OPCUA!')
         else:
             print('Control Mode is set to Unknown! Check value of control_mode in Flask_server.py')
 
     def stopButton(self):
-        local_ur10e.STOP = 1  # will be reset by reply from robot
-        socket.emit('STOP_button')  # for alert on webpage
-        self.send_movement()  # send STOP signal
+        if local_ur10e.control_mode == 0:   # flask
+            local_ur10e.STOP = 1  # will be reset by reply from robot
+            socket.emit('STOP_button')  # for alert on webpage
+            self.send_movement()  # send STOP signal
 
-        # robot will send reset_STOP_flag after coming to a complete stop
+            # robot will send reset_STOP_flag after coming to a complete stop
 
-        while local_ur10e.reset_STOP_flag == 0:
-            print('debug: Waiting for resset_STOP_flag to turn to 1')
-            time.sleep(flask_per)  # wait until reset_STOP_flag comes from robot
+            while local_ur10e.reset_STOP_flag == 0:
+                print('debug: Waiting for resset_STOP_flag to turn to 1')
+                time.sleep(flask_per)  # wait until reset_STOP_flag comes from robot
 
-        print('debug: reset_STOP_flag turned to 1! DONE! Resetting STOP to 0')
-        local_ur10e.STOP = 0
-        self.send_movement()
+            print('debug: reset_STOP_flag turned to 1! DONE! Resetting STOP to 0')
+            local_ur10e.STOP = 0
+            self.send_movement()
 
-        # raise global stop flag for runProgram function to see (if program is running)
+            # raise global stop flag for runProgram function to see (if program is running)
 
-        self.global_stop_flag = True  # run_program_will lower it
+            self.global_stop_flag = True  # run_program_will lower it
+        else:
+            socket.emit('not_the_active_controller')
 
     def addToList(self, data):
         local_ur10e.move_type = data["move_type"]  # updated local move_type variable for each ADD button press
@@ -453,6 +556,24 @@ class Buttons:
 
         self.socket.emit('update_control_mode', {'control_mode': local_ur10e.control_mode})
 
+    def pause_video(self, data):
+        topic = b'video'
+        should_play = 0
+
+        id = data["video_id"]
+        # print(data)
+        msg = json.dumps([id, should_play]).encode()
+        self.message_queue.put([topic, msg])
+
+    def play_video(self, data):
+        topic = b'video'
+        should_play = 1
+
+        id = data["video_id"]
+        # print(data)
+        msg = json.dumps([id, should_play]).encode()
+        self.message_queue.put([topic, msg])
+
     def process_queue(self):
         if not self.message_queue.empty():
             topic, msg = self.message_queue.get()
@@ -472,11 +593,9 @@ if __name__ == '__main__':
 
     flask_server = FlaskServer()
     app = flask_server.get_app()
+    app.config['UPLOAD_FOLDER'] = 'static'  # The directory where your images are stored
 
-    # install gevent and gevent-websocket to run in production mode
-    # web client updates are much slower when in production mode
-    # socket = SocketIO(app, async_mode='gevent')
-    socket = SocketIO(app)
+    socket = SocketIO(app, cors_allowed_origins=["http://www.uitrobot.com:8090", "http://10.0.0.225:8090"])
     buttons = Buttons(socket)
 
     SocketIOEvents(socket, buttons)
@@ -485,7 +604,7 @@ if __name__ == '__main__':
     def run_app():
         serve(app, host="0.0.0.0", port=config.PORT_FLASK_WEB)
 
-        # this is only for gevent
+        # this is only for gevent or development mode
         # socket.run(app, host=config.IP_FLASK_LOCAL, port=config.PORT_FLASK, debug=False,
         #            allow_unsafe_werkzeug=True)
 
@@ -496,7 +615,12 @@ if __name__ == '__main__':
     receiver_thread = threading.Thread(target=mw_handler.receive_from_mw)
     receiver_thread.start()
 
+    receive_video_thread_1 = threading.Thread(target=mw_handler.receive_video_feed_1)
+    receive_video_thread_2 = threading.Thread(target=mw_handler.receive_video_feed_2)
+    receive_video_thread_3 = threading.Thread(target=mw_handler.receive_video_feed_3)
+    receive_video_thread_1.start()
+    receive_video_thread_2.start()
+    receive_video_thread_3.start()
+
     receive_polling_thread = threading.Thread(target=mw_handler.receive_polling())
     receive_polling_thread.start()
-
-

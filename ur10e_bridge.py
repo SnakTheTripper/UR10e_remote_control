@@ -260,26 +260,32 @@ class AsyncHandler:
             while status_bit != 1:
                 # Protective Stop
                 if status_bit == 3:
-                    try:
-                        print('Protective Stop detected. Attempting to clear in 5 seconds...')
-                        self.rtde_handler.ur_dashboard_client.closeSafetyPopup()
-                        await asyncio.sleep(0.5)
-                        self.rtde_handler.ur_dashboard_client.popup('Clearing Protective Stop in 5 seconds...')
+                    while status_bit != 1:
+                        status_bit = self.rtde_handler.rtde_r.getSafetyMode()
+                        await asyncio.sleep(0.1)
 
-                        # wait 5 seconds before clearing Protective Stop
-                        for i in range(5):
-                            print(5 - i)
-                            await asyncio.sleep(1)
-
-                        self.rtde_handler.ur_dashboard_client.unlockProtectiveStop()
-                        self.rtde_handler.ur_dashboard_client.closePopup()
-                        self.rtde_handler.ur_dashboard_client.popup('Protective Stop Cleared!')
-                        print('Protective Stop cleared!')
-                        self.rtde_handler.connect_rtde_c()
-
-                    except Exception as e:
-                        self.rtde_handler.ur_dashboard_client.popup('Error while trying to clear protective stop!')
-                        print(f'Error clearing Protective Stop: {e}')
+                    print("Protective Stop Reset!")
+                    self.rtde_handler.connect_rtde_c()
+                    # try:
+                    #     print('Protective Stop detected. Attempting to clear in 5 seconds...')
+                    #     self.rtde_handler.ur_dashboard_client.closeSafetyPopup()
+                    #     await asyncio.sleep(0.5)
+                    #     self.rtde_handler.ur_dashboard_client.popup('Clearing Protective Stop in 5 seconds...')
+                    #
+                    #     # wait 5 seconds before clearing Protective Stop
+                    #     for i in range(5):
+                    #         print(5 - i)
+                    #         await asyncio.sleep(1)
+                    #
+                    #     self.rtde_handler.ur_dashboard_client.unlockProtectiveStop()
+                    #     self.rtde_handler.ur_dashboard_client.closePopup()
+                    #     self.rtde_handler.ur_dashboard_client.popup('Protective Stop Cleared!')
+                    #     print('Protective Stop cleared!')
+                    #     self.rtde_handler.connect_rtde_c()
+                    #
+                    # except Exception as e:
+                    #     self.rtde_handler.ur_dashboard_client.popup('Error while trying to clear protective stop!')
+                    #     print(f'Error clearing Protective Stop: {e}')
 
                 else:
                     print(f'Unrecognized Stop Mode. Status bit: {status_bit}')
