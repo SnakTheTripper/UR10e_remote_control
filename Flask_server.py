@@ -45,7 +45,7 @@ class UR10e:
 
         # represents last used move_type
         self.move_type = 1  # 0 = linear 1 = joint
-        self.control_mode = config.DEFAULT_MODE  # 0 = flask  1 = opcua
+        self.control_mode = config.DEFAULT_CONTROL_MODE  # 0 = flask  1 = opcua
         self.joint_speed = 10
         self.joint_accel = 10
         self.linear_speed = 0.1
@@ -69,10 +69,12 @@ class UR10e:
         self.target_configurable_output_bits = [0] * 8
         self.target_tool_output_bits = [0] * 2
 
-        self.page_init = False
         self.program_list = []
 
+        self.mw_time = 'flask init value'
+
     def update_local_dataset(self, data_dictionary):
+        # print(f'debug {self.mw_time}')
         for key, value in data_dictionary.items():
             if key not in ['page_init']:
                 setattr(self, key, value)
@@ -103,13 +105,18 @@ class UR10e:
 class MiddleWare:
     def __init__(self):
         self.websocket = socket
-        context = zmq.Context()
 
-        self.polling_socket = context.socket(zmq.REP)
-        self.update_socket = context.socket(zmq.SUB)
-        self.video_socket_1 = context.socket(zmq.SUB)
-        self.video_socket_2 = context.socket(zmq.SUB)
-        self.video_socket_3 = context.socket(zmq.SUB)
+        class ZmqSockets:
+            def __init__(self):
+                self.context = zmq.Context()
+
+                self.polling_socket = self.context.socket(zmq.REP)
+                self.update_socket = self.context.socket(zmq.SUB)
+                self.video_socket_1 = self.context.socket(zmq.SUB)
+                self.video_socket_2 = self.context.socket(zmq.SUB)
+                self.video_socket_3 = self.context.socket(zmq.SUB)
+
+        self.zmq = ZmqSockets()
 
         self.topic = None
         self.received_message = None
@@ -121,17 +128,17 @@ class MiddleWare:
     def connect_to_mw(self):
         # Connect to MW
         try:
-            self.polling_socket.bind(f"tcp://*:{config.PORT_FLASK_POLL}")
-            self.update_socket.bind(f"tcp://*:{config.PORT_FLASK_UPDATE}")
-            self.video_socket_1.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_1}")
-            self.video_socket_2.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_2}")
-            self.video_socket_3.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_3}")
+            self.zmq.polling_socket.bind(f"tcp://*:{config.PORT_FLASK_POLL}")
+            self.zmq.update_socket.bind(f"tcp://*:{config.PORT_FLASK_UPDATE}")
+            self.zmq.video_socket_1.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_1}")
+            self.zmq.video_socket_2.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_2}")
+            self.zmq.video_socket_3.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_3}")
 
-            self.update_socket.setsockopt(zmq.SUBSCRIBE, b'Joint_States')
-            self.update_socket.setsockopt(zmq.SUBSCRIBE, b'switchControl')
-            self.video_socket_1.setsockopt_string(zmq.SUBSCRIBE, '')
-            self.video_socket_2.setsockopt_string(zmq.SUBSCRIBE, '')
-            self.video_socket_3.setsockopt_string(zmq.SUBSCRIBE, '')
+            self.zmq.update_socket.setsockopt(zmq.SUBSCRIBE, b'Joint_States')
+            self.zmq.update_socket.setsockopt(zmq.SUBSCRIBE, b'switchControl')
+            self.zmq.video_socket_1.setsockopt_string(zmq.SUBSCRIBE, '')
+            self.zmq.video_socket_2.setsockopt_string(zmq.SUBSCRIBE, '')
+            self.zmq.video_socket_3.setsockopt_string(zmq.SUBSCRIBE, '')
 
             print(f'Bound ports {config.PORT_FLASK_POLL} & {config.PORT_FLASK_UPDATE} to listen to MW')
         except Exception as e:
@@ -139,14 +146,14 @@ class MiddleWare:
 
     def receive_polling(self):
         while True:
-            message = self.polling_socket.recv()
+            message = self.zmq.polling_socket.recv()
             # print(f"I got this message: {message.decode()}")
             buttons.process_queue()
 
-    def receive_from_mw(self):  # on web client
+    def receive_from_mw(self):
         while True:
             try:
-                [self.topic, self.received_message] = self.update_socket.recv_multipart()
+                [self.topic, self.received_message] = self.zmq.update_socket.recv_multipart()
                 # print(f'message from WM: {json.loads(self.received_message.decode())}')
             except Exception as e:
                 print(f"Error in receiving the actual joint positions!: {e}")
@@ -178,7 +185,7 @@ class MiddleWare:
             try:
                 # print('waiting for video feed')
                 # Receive frame bytes from MW with ZMQ
-                frame_bytes = self.video_socket_1.recv()
+                frame_bytes = self.zmq.video_socket_1.recv()
             except Exception as e:
                 print(f"Error in receiving the video feed!: {e}")
 
@@ -194,7 +201,7 @@ class MiddleWare:
             try:
                 # print('waiting for video feed')
                 # Receive frame bytes from MW with ZMQ
-                frame_bytes = self.video_socket_2.recv()
+                frame_bytes = self.zmq.video_socket_2.recv()
             except Exception as e:
                 print(f"Error in receiving the video feed!: {e}")
 
@@ -210,7 +217,7 @@ class MiddleWare:
             try:
                 # print('waiting for video feed')
                 # Receive frame bytes from MW with ZMQ
-                frame_bytes = self.video_socket_3.recv()
+                frame_bytes = self.zmq.video_socket_3.recv()
             except Exception as e:
                 print(f"Error in receiving the video feed!: {e}")
 
@@ -234,18 +241,18 @@ class FlaskServer:
         def index():
             return redirect('/home')
 
-        @self.app.route('/home')
+        @self.app.route('/home', methods=["GET", "POST"])
         def home():
             return render_template('home.html')
 
-        @self.app.route('/joint_control')
+        @self.app.route('/joint_control', methods=["GET", "POST"])
         def JOINT_control_page():
             print("Joint Control Page Opened!")
             local_ur10e.move_type = 1  # moveJ
             config_data = gather_config_data_for_JavaScript()
             return render_template('JOINT_control.html', config_data=config_data)
 
-        @self.app.route('/tcp_control')
+        @self.app.route('/tcp_control', methods=["GET", "POST"])
         def TCP_control_page():
             print("TCP Control Page Opened!")
             local_ur10e.move_type = 0  # moveL
@@ -276,8 +283,6 @@ class FlaskServer:
             print("Surveillance Video Page Opened! - ALL")
             config_data = gather_config_data_for_JavaScript()
             return render_template('videos/video_all.html', config_data=config_data)
-
-
 
 
 class SocketIOEvents:
@@ -320,7 +325,7 @@ class SocketIOEvents:
             self.socket.emit('updateTable', {'program_list': local_ur10e.program_list})
 
         @self.socket.on('page_init')
-        def page_init():  # start current_position flow after page load for initialization
+        def page_init():
             # Send page initialization values
             self.web.send_page_initialization_values()
 
@@ -340,7 +345,8 @@ class WebMethods:
     def update_current_positions(self):
         self.socket.emit('update_current_positions',
                          {'current_joint': local_ur10e.current_joint,
-                          'current_tcp': local_ur10e.current_tcp})
+                          'current_tcp': local_ur10e.current_tcp,
+                          'mw_time': local_ur10e.mw_time})
 
     def update_target_positions(self):
         self.socket.emit('update_target_positions',
@@ -383,7 +389,8 @@ class WebMethods:
                                               'standard_output_bits': local_ur10e.standard_output_bits,
                                               'configurable_output_bits': local_ur10e.configurable_output_bits,
                                               'tool_output_bits': local_ur10e.tool_output_bits,
-                                              'io_panel_state': buttons.io_panel_state})
+                                              'io_panel_state': buttons.io_panel_state,
+                                              'mw_time': local_ur10e.mw_time})
 
 
 class Buttons:
@@ -454,10 +461,10 @@ class Buttons:
             # robot will send reset_STOP_flag after coming to a complete stop
 
             while local_ur10e.reset_STOP_flag == 0:
-                print('debug: Waiting for resset_STOP_flag to turn to 1')
+                # print('debug: Waiting for resset_STOP_flag to turn to 1')
                 time.sleep(flask_per)  # wait until reset_STOP_flag comes from robot
 
-            print('debug: reset_STOP_flag turned to 1! DONE! Resetting STOP to 0')
+            # print('debug: reset_STOP_flag turned to 1! DONE! Resetting STOP to 0')
             local_ur10e.STOP = 0
             self.send_movement()
 
@@ -578,13 +585,13 @@ class Buttons:
         if not self.message_queue.empty():
             topic, msg = self.message_queue.get()
             try:
-                mw_handler.polling_socket.send_multipart([topic, msg])
+                mw_handler.zmq.polling_socket.send_multipart([topic, msg])
             except Exception as e:
                 print(e)
         else:
             topic = b'chill'
             msg = b'blank'
-            mw_handler.polling_socket.send_multipart([topic, msg])
+            mw_handler.zmq.polling_socket.send_multipart([topic, msg])
 
 
 if __name__ == '__main__':
@@ -595,9 +602,11 @@ if __name__ == '__main__':
     app = flask_server.get_app()
     app.config['UPLOAD_FOLDER'] = 'static'  # The directory where your images are stored
 
-    socket = SocketIO(app, cors_allowed_origins=["http://www.uitrobot.com:8090", "http://10.0.0.225:8090"])
+    socket = SocketIO(app, cors_allowed_origins=[f"{config.FLASK_DOMAIN}",
+                                                f"{config.FLASK_DOMAIN}:{config.PORT_FLASK_WEB}",
+                                                f"http://{config.IP_FLASK_LOCAL}",
+                                                f"http://{config.IP_FLASK_LOCAL}:{config.PORT_FLASK_WEB}"])
     buttons = Buttons(socket)
-
     SocketIOEvents(socket, buttons)
 
 

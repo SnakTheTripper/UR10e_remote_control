@@ -5,42 +5,47 @@ ONLINE_MODE = True
 
 # ------------------ IP Addresses ------------------
 
-IP_UR10e = "10.0.0.100"      # URSim on Snak's Laptop
+IP_UR10e = "192.168.1.3"      # URSim on Snak's Laptop
 
-IP_BRIDGE = "10.0.0.225"
-IP_MWARE = "10.0.0.225"
-IP_FLASK_LOCAL = "10.0.0.225"
+IP_BRIDGE = "192.168.1.225"
+IP_MWARE = "192.168.1.225"
+IP_OPCUA = "192.168.1.225"
+
+IP_FLASK_LOCAL = "192.168.1.225"
 IP_FLASK_CLOUD = "20.100.204.66"
-IP_OPCUA = "10.0.0.225"
 
 PORT_UR_DASHBOARD = 29999   # port for UR dashboard client
-PORT_FLASK_WEB = 8090           # port of Flask Server
+FLASK_DOMAIN = 'http://www.uitrobot.com'
+PORT_FLASK_WEB = 80       # port of Flask Server
 PORT_OPCUA = 5001           # port of OPCUA Server
 
 # ------------------ Ports ---------------------------
 
 PORT_B_MW = 5553                # bridge to MW
 PORT_MW_B = 5554                # MW to bridge
-PORT_FLASK_POLL = 8091          # MW to Flask and back
-PORT_FLASK_UPDATE = 8092        # MW to Flask
-PORT_FLASK_VIDEO_1 = 5555       # live camera feed to Flask
-PORT_FLASK_VIDEO_2 = 5556       # unused
-PORT_FLASK_VIDEO_3 = 5557       # unused
+
 PORT_MW_OP = 5559               # MW to OPCUA
 PORT_OP_MW = 5560               # OPCUA to MW
+
+PORT_FLASK_POLL = 8091          # MW to Flask - and back
+PORT_FLASK_UPDATE = 8092        # MW to Flask - update data
+
+PORT_FLASK_VIDEO_1 = 5555       # live camera feed 1 to Flask
+PORT_FLASK_VIDEO_2 = 5556       # live camera feed 2 to Flask
+PORT_FLASK_VIDEO_3 = 5557       # live camera feed 3 to Flask
 
 # ------------------ Frequencies ---------------------
 
 RTDE_FREQ = 500             # [1 - rtde_frequency]
-FLASK_FREQ = 100            # [1 - rtde_frequency]
-OPCUA_FREQ = 20             # [1 - rtde_frequency]
+FLASK_FREQ = 50            # [1 - rtde_frequency]
+OPCUA_FREQ = 50             # [1 - rtde_frequency]
 
 # ------------------ Control Modes --------------------
 class ControlModes(Enum):
     FLASK = 0
     OPCUA = 1
 
-DEFAULT_MODE = ControlModes.FLASK.value
+DEFAULT_CONTROL_MODE = ControlModes.FLASK.value
 
 # ------------------ Starter Program ------------------
 
@@ -49,16 +54,16 @@ STARTER_PROGRAM = programs.tcp_test
 
 # ------------------ Robot Settings -------------------
 
-robot_home_position_joint = [-180, -60.0, -120.0, -90.0, 90.0, 0.0]
-robot_home_position_tcp = [-385, 174, 595, 180, 0, -90]          # in mm
+robot_home_position_joint = [-180, -60.0, -120.0, -90.0, 90.0, 0.0]     # in deg
+robot_home_position_tcp = [-385, 174, 595, 180, 0, -90]                 # in mm
 
-joint_limits_lower = [-359, -190, -155, -359, -90, -359]        # joint 1 to 6 all in degrees
+joint_limits_lower = [-359, -190, -155, -359, -90, -359]        # joint 1 to 6
 joint_limits_upper = [359, 10, 155, 359, 90, 359]               # joint 1 to 6
-tcp_limits_lower = [-1000, -1000, 100, -180, -180, -180]        # xyz (mm)a nd rx ry rz (deg)
-tcp_limits_upper = [1000, 1000, 1480, 180, 180, 180]            # xyz and rx ry rz
+tcp_limits_lower = [-1000, -1000, 100, -180, -180, -180]        # XYZ in mm and RPY in deg
+tcp_limits_upper = [1000, 1000, 1480, 180, 180, 180]            # XYZ in mm and RPY in deg
 
 # --------------------- Camera --------------------------
 
-camera_rtsp_link_1 = 'rtsp://10.0.0.228:554/stream1'
-camera_rtsp_link_2 = 'rtsp://10.0.0.229:554/stream1'
-camera_rtsp_link_3 = 'rtsp://10.0.0.231:554/stream1'
+camera_rtsp_link_1 = 'rtsp://192.168.1.228:554/stream1'
+camera_rtsp_link_2 = 'rtsp://192.168.1.229:554/stream1'
+camera_rtsp_link_3 = 'rtsp://192.168.1.231:554/stream1'

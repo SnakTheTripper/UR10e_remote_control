@@ -21,143 +21,57 @@ flask_per = freq_dict['flask_per']
 opcua_per = freq_dict['opcua_per']
 
 
-def initialize_zmq_connections(context):
-    to_bridge_socket = context.socket(zmq.PUB)
-    from_bridge_socket = context.socket(zmq.SUB)
-    flask_polling = context.socket(zmq.REQ)
-    to_flask_update = context.socket(zmq.PUB)
-    to_opcua_socket = context.socket(zmq.PUB)
-    from_opcua_socket = context.socket(zmq.SUB)
-    try:  # com with UR10e_bridge
-        to_bridge_socket.connect(f"tcp://{config.IP_BRIDGE}:{config.PORT_MW_B}")
-        from_bridge_socket.connect(f"tcp://{config.IP_BRIDGE}:{config.PORT_B_MW}")
-        print('\033[32mUR10e Bridge ports bound!\033[0m')
-    except Exception as e:
-        sys.exit(f"\033[91mCan't connect to UR10e Bridge! {e}\033[0m")
-
-    try:  # com with Flask Server
-        if config.ONLINE_MODE:
-            flask_polling.connect(f"tcp://{config.IP_FLASK_CLOUD}:{config.PORT_FLASK_POLL}")
-            to_flask_update.connect(f"tcp://{config.IP_FLASK_CLOUD}:{config.PORT_FLASK_UPDATE}")
-            print(f'\033[32mConnected to Flask on {config.IP_FLASK_CLOUD}!\033[0m')
-        else:
-            flask_polling.connect(f"tcp://{config.IP_FLASK_LOCAL}:{config.PORT_FLASK_POLL}")
-            to_flask_update.connect(f"tcp://{config.IP_FLASK_LOCAL}:{config.PORT_FLASK_UPDATE}")
-            print(f'\033[32mConnected to Flask on {config.IP_FLASK_LOCAL}!\033[0m')
-    except Exception as e:
-        sys.exit(f"\033[91mCan't connect to Flask Server! {e}\033[0m")
-
-    try:  # com with OPCUA Server
-        to_opcua_socket.bind(f"tcp://{config.IP_MWARE}:{config.PORT_MW_OP}")
-        from_opcua_socket.bind(f"tcp://{config.IP_MWARE}:{config.PORT_OP_MW}")
-        print('\033[32mOPCUA Server ports bound!\033[0m')
-    except Exception as e:
-        sys.exit(f"\033[91mCan't connect to OPCUA Server! {e}\033[0m")
-
-    print(
-        f'Publish on port: {config.PORT_FLASK_POLL} & {config.PORT_MW_B} & {config.PORT_OP_MW}\n'
-        f'Listening on port: {str(8090)} & {config.PORT_B_MW} & {config.PORT_MW_OP}')
-
-    return to_opcua_socket, to_bridge_socket, flask_polling, to_flask_update, from_bridge_socket, from_opcua_socket
-
-
-class Cameras:
+class ZmqSockets:
     def __init__(self):
-        self.context = zmq.Context()
-        self.camera_url_1 = config.camera_rtsp_link_1
-        self.camera_url_2 = config.camera_rtsp_link_2
-        self.camera_url_3 = config.camera_rtsp_link_3
+        self.context = zmq.asyncio.Context()
 
-        self.should_stream_1 = 0
-        self.should_stream_2 = 0
-        self.should_stream_3 = 0
+        # SOCKETS
 
-        self.video_socket_1 = self.connect_camera_to_flask(video_id=1)
-        self.video_socket_2 = self.connect_camera_to_flask(video_id=2)
-        self.video_socket_3 = self.connect_camera_to_flask(video_id=3)
+        self.to_bridge = self.context.socket(zmq.PUB)
+        self.from_bridge = self.context.socket(zmq.SUB)
+        self.flask_polling = self.context.socket(zmq.REQ)
+        self.flask_update = self.context.socket(zmq.PUB)
+        self.to_opcua = self.context.socket(zmq.PUB)
+        self.from_opcua = self.context.socket(zmq.SUB)
 
-    def connect_camera_to_flask(self, video_id):
-        video_socket = self.context.socket(zmq.PUB)
-        port_attr = f"PORT_FLASK_VIDEO_{video_id}"
+        self.initialize_zmq_connections()
+        self.subscribe_to_topics()
 
-        if config.ONLINE_MODE:
-            video_socket.connect(f"tcp://{config.IP_FLASK_CLOUD}:{getattr(config, port_attr)}")
-        else:
-            video_socket.connect(f"tcp://{config.IP_FLASK_LOCAL}:{getattr(config, port_attr)}")
+    def initialize_zmq_connections(self):
+        try:  # com with UR10e_bridge
+            self.to_bridge.connect(f"tcp://{config.IP_BRIDGE}:{config.PORT_MW_B}")
+            self.from_bridge.connect(f"tcp://{config.IP_BRIDGE}:{config.PORT_B_MW}")
+            print('\033[32mUR10e Bridge ports bound!\033[0m')
+        except Exception as e:
+            sys.exit(f"\033[91mCan't connect to UR10e Bridge! {e}\033[0m")
 
-        return video_socket
+        try:  # com with Flask Server
+            if config.ONLINE_MODE:
+                self.flask_polling.connect(f"tcp://{config.IP_FLASK_CLOUD}:{config.PORT_FLASK_POLL}")
+                self.flask_update.connect(f"tcp://{config.IP_FLASK_CLOUD}:{config.PORT_FLASK_UPDATE}")
+                print(f'\033[32mConnected to Flask on {config.IP_FLASK_CLOUD}!\033[0m')
+            else:
+                self.flask_polling.connect(f"tcp://{config.IP_FLASK_LOCAL}:{config.PORT_FLASK_POLL}")
+                self.flask_update.connect(f"tcp://{config.IP_FLASK_LOCAL}:{config.PORT_FLASK_UPDATE}")
+                print(f'\033[32mConnected to Flask on {config.IP_FLASK_LOCAL}!\033[0m')
+        except Exception as e:
+            sys.exit(f"\033[91mCan't connect to Flask Server! {e}\033[0m")
 
-    def start_camera_1(self):
-        while True:
-            # Create a VideoCapture object to connect to the camera
-            cap = cv2.VideoCapture(self.camera_url_1)
+        try:  # com with OPCUA Server
+            self.to_opcua.bind(f"tcp://{config.IP_MWARE}:{config.PORT_MW_OP}")
+            self.from_opcua.bind(f"tcp://{config.IP_MWARE}:{config.PORT_OP_MW}")
+            print('\033[32mOPCUA Server ports bound!\033[0m')
+        except Exception as e:
+            sys.exit(f"\033[91mCan't connect to OPCUA Server! {e}\033[0m")
 
-            while self.should_stream_1:
-                # Capture a frame from the camera
-                ret, frame = cap.read()
+        print(
+            f'Publish on port: {config.PORT_FLASK_POLL} & {config.PORT_FLASK_UPDATE} & {config.PORT_MW_B} & {config.PORT_MW_OP}\n'
+            f'Listening on port: {config.PORT_FLASK_VIDEO_1} & {config.PORT_FLASK_VIDEO_2} & {config.PORT_FLASK_VIDEO_3} & {config.PORT_B_MW} & {config.PORT_OP_MW}')
 
-                if not ret:
-                    print('did not receive frame from camera!')
-                    break
-
-                # Compress the frame
-                ret, buffer = cv2.imencode('.jpg', frame)
-                # Convert to bytes
-                frame_bytes = buffer.tobytes()
-
-                # Send the frame bytes over ZMQ
-                self.video_socket_1.send(frame_bytes)
-
-            cap.release()
-            time.sleep(1)
-
-    def start_camera_2(self):
-        while True:
-            # Create a VideoCapture object to connect to the camera
-            cap = cv2.VideoCapture(self.camera_url_2)
-
-            while self.should_stream_2:
-                # Capture a frame from the camera
-                ret, frame = cap.read()
-
-                if not ret:
-                    print('did not receive frame from camera!')
-                    break
-
-                # Compress the frame
-                ret, buffer = cv2.imencode('.jpg', frame)
-                # Convert to bytes
-                frame_bytes = buffer.tobytes()
-
-                # Send the frame bytes over ZMQ
-                self.video_socket_2.send(frame_bytes)
-
-            cap.release()
-            time.sleep(1)
-
-    def start_camera_3(self):
-        while True:
-            # Create a VideoCapture object to connect to the camera
-            cap = cv2.VideoCapture(self.camera_url_3)
-
-            while self.should_stream_3:
-                # Capture a frame from the camera
-                ret, frame = cap.read()
-
-                if not ret:
-                    print('did not receive frame from camera!')
-                    break
-
-                # Compress the frame
-                ret, buffer = cv2.imencode('.jpg', frame)
-                # Convert to bytes
-                frame_bytes = buffer.tobytes()
-
-                # Send the frame bytes over ZMQ
-                self.video_socket_3.send(frame_bytes)
-
-            cap.release()
-            time.sleep(1)
+    def subscribe_to_topics(self):
+        self.from_opcua.setsockopt(zmq.SUBSCRIBE, b"Move_Command")
+        self.from_opcua.setsockopt(zmq.SUBSCRIBE, b"output_bit_command")
+        self.from_opcua.setsockopt(zmq.SUBSCRIBE, b"switchControl")
 
 
 class UR10e:
@@ -169,7 +83,7 @@ class UR10e:
         self.target_tcp = config.robot_home_position_tcp
 
         self.move_type = 1  # 0 = linear 1 = joint (represents last used move_type)
-        self.control_mode = config.DEFAULT_MODE  # 0 = flask  1 = opcua
+        self.control_mode = config.DEFAULT_CONTROL_MODE  # 0 = flask  1 = opcua
 
         self.joint_speed = 10
         self.joint_accel = 10
@@ -194,7 +108,7 @@ class UR10e:
         self.target_configurable_output_bits = [0] * 8
         self.target_tool_output_bits = [0] * 2
 
-        self.page_init = False
+        self.mw_time = ''
 
     def update_local_dataset(self, data_dictionary):
         for key, value in data_dictionary.items():
@@ -226,7 +140,8 @@ class UR10e:
 
                         'target_standard_output_bits',
                         'target_configurable_output_bits',
-                        'target_tool_output_bits'
+                        'target_tool_output_bits',
+                        'mw_time'
                         ]}
 
     def gather_to_send_current(self):  # send status updates to active controller
@@ -242,32 +157,120 @@ class UR10e:
 
                         'standard_output_bits',
                         'configurable_output_bits',
-                        'tool_output_bits'
+                        'tool_output_bits',
+                        'mw_time'
                         ]}  # add input bits when added to bridge
+
+    async def update_time(self):
+        while True:
+            now = datetime.now()
+            # self.mw_time = now.strftime("%H:%M:%S.%f")[:-3]
+            self.mw_time = now.strftime("%H:%M:%S")
+
+            await asyncio.sleep(flask_per)
 
 
 class FlaskHandler:
-    def __init__(self, flask_polling, to_flask_update, to_bridge, local_ur, cameras):
-        self.opcua_handler = None
-        self.flask_polling = flask_polling
-        self.to_flask_update = to_flask_update
-        self.to_bridge_sock = to_bridge
+    class Cameras:
+        def __init__(self):
+            self.context = zmq.Context()
+            self.camera_url_1 = config.camera_rtsp_link_1
+            self.camera_url_2 = config.camera_rtsp_link_2
+            self.camera_url_3 = config.camera_rtsp_link_3
+
+            self.should_stream_1 = 1
+            self.should_stream_2 = 1
+            self.should_stream_3 = 1
+
+            self.video_socket_1 = self.initialize_zmq(video_id=1)
+            self.video_socket_2 = self.initialize_zmq(video_id=2)
+            self.video_socket_3 = self.initialize_zmq(video_id=3)
+
+        def initialize_zmq(self, video_id):
+            video_socket = self.context.socket(zmq.PUB)
+            port_attr = f"PORT_FLASK_VIDEO_{video_id}"
+
+            if config.ONLINE_MODE:
+                video_socket.connect(f"tcp://{config.IP_FLASK_CLOUD}:{getattr(config, port_attr)}")
+            else:
+                video_socket.connect(f"tcp://{config.IP_FLASK_LOCAL}:{getattr(config, port_attr)}")
+
+            return video_socket
+
+        def start_camera_1(self):
+            while True:
+                # Create a VideoCapture object to connect to the camera
+                cap = cv2.VideoCapture(self.camera_url_1)
+
+                while self.should_stream_1:
+                    # Capture a frame from the camera
+                    ret, frame = cap.read()
+
+                    if not ret:
+                        print('did not receive frame from camera!')
+                        break
+
+                    # Compress the frame
+                    ret, buffer = cv2.imencode('.jpg', frame)
+                    # Convert to bytes
+                    frame_bytes = buffer.tobytes()
+
+                    # Send the frame bytes over ZMQ
+                    self.video_socket_1.send(frame_bytes)
+
+                cap.release()
+                time.sleep(1)
+
+        def start_camera(self, camera_id):
+
+            # print(f'debug: Starting camera {camera_id}')
+
+            # Map camera_id to corresponding attributes
+            camera_url = getattr(self, f"camera_url_{camera_id}")
+            video_socket = getattr(self, f"video_socket_{camera_id}")
+
+            while True:
+                # Create a VideoCapture object to connect to the camera
+                cap = cv2.VideoCapture(camera_url)
+
+                while getattr(self, f"should_stream_{camera_id}"):
+                    # Capture a frame from the camera
+                    ret, frame = cap.read()
+
+                    if not ret:
+                        print(f'Did not receive frame from camera {camera_id}!')
+                        break
+
+                    # Compress the frame
+                    ret, buffer = cv2.imencode('.jpg', frame)
+                    # Convert to bytes
+                    frame_bytes = buffer.tobytes()
+
+                    # Send the frame bytes over ZMQ
+                    video_socket.send(frame_bytes)
+
+                cap.release()
+                time.sleep(1)
+
+    def __init__(self, zmq_sockets, local_ur):
+        self.zmq = zmq_sockets      # use self.zmq.<socket_name>
 
         # discard old REQs if a new one is sent out
-        self.flask_polling.setsockopt(zmq.REQ_RELAXED, 1)
+        self.zmq.flask_polling.setsockopt(zmq.REQ_RELAXED, 1)
 
         self.local_ur10e = local_ur
 
         # periods
-        self.standby_period = 1  # for frequency of 1 Hz
-        self.flask_period = flask_per  # by default coming from project_utils.py
+        self.standby_period = 1             # for frequency of 1 Hz
+        self.flask_period = flask_per       # by default coming from project_utils.py
+
         # period between checking if standby or rtde period should be used in sending current states to Flask
         self.calculate_flask_frequency_period = 0.1
         self.polling_reply_detected = False
 
         # CAMERA STUFF
 
-        self.cameras = cameras
+        self.cameras = self.Cameras()
 
         # camera heartbeat tracking
         self.camera_heartbeats = {1: time.time(), 2: time.time(), 3: time.time()}  # Initialize with current time
@@ -275,16 +278,19 @@ class FlaskHandler:
 
         self.heartbeat_task = asyncio.create_task(self.check_camera_heartbeats())
 
-    def set_cross_dependency(self, opcua_handler):
-        self.opcua_handler = opcua_handler
-
-    import time
+        # start cameras threads
+        self.video_thread_1 = threading.Thread(target=self.cameras.start_camera, args=(1,))
+        self.video_thread_2 = threading.Thread(target=self.cameras.start_camera, args=(2,))
+        self.video_thread_3 = threading.Thread(target=self.cameras.start_camera, args=(3,))
+        self.video_thread_1.start()
+        self.video_thread_2.start()
+        self.video_thread_3.start()
 
     async def polling_mechanism(self):
         while True:
             self.polling_reply_detected = False
             try:
-                self.flask_polling.send(b'poll')
+                self.zmq.flask_polling.send(b'poll')
             except zmq.ZMQError as e:
                 print(f"ZMQ Error: {e}")
 
@@ -300,9 +306,9 @@ class FlaskHandler:
                     try:
                         # Reconnect logic
                         if config.ONLINE_MODE:
-                            self.flask_polling.connect(f"tcp://{config.IP_FLASK_CLOUD}:{config.PORT_FLASK_POLL}")
+                            self.zmq.flask_polling.connect(f"tcp://{config.IP_FLASK_CLOUD}:{config.PORT_FLASK_POLL}")
                         else:
-                            self.flask_polling.connect(f"tcp://{config.IP_FLASK_LOCAL}:{config.PORT_FLASK_POLL}")
+                            self.zmq.flask_polling.connect(f"tcp://{config.IP_FLASK_LOCAL}:{config.PORT_FLASK_POLL}")
                     except Exception as e:
                         print(f"Exception while resetting socket: {e}")
                     break  # Exit the inner loop
@@ -318,7 +324,7 @@ class FlaskHandler:
                 serialized_message = json.dumps(self.local_ur10e.gather_to_send_all()).encode()
 
             try:
-                await self.to_flask_update.send_multipart([b"Joint_States", serialized_message])
+                await self.zmq.flask_update.send_multipart([b"Joint_States", serialized_message])
             except Exception as e:
                 print(f'Can not send update to Flask: {e}')
 
@@ -331,7 +337,7 @@ class FlaskHandler:
         # receive from Flask
         while True:
             try:
-                topic, serialized_message = await self.flask_polling.recv_multipart()
+                topic, serialized_message = await self.zmq.flask_polling.recv_multipart()
                 self.polling_reply_detected = True
             except Exception as e:
                 print(e)
@@ -342,7 +348,7 @@ class FlaskHandler:
                 message = json.loads(serialized_message.decode())
                 print(f'debug: target tcp pose: {message}')
                 # forward to bridge
-                await self.to_bridge_sock.send_multipart([topic, serialized_message])
+                await self.zmq.to_bridge.send_multipart([topic, serialized_message])
                 print(f'debug: sent to bridge, STOP =  {self.local_ur10e.STOP}')
 
             elif topic == b'output_bit_command':
@@ -350,7 +356,7 @@ class FlaskHandler:
                 # unpack and update local dataset
                 self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
                 # forward to bridge
-                await self.to_bridge_sock.send_multipart([topic, serialized_message])
+                await self.zmq.to_bridge.send_multipart([topic, serialized_message])
 
             elif topic == b"switchControl":
                 # set local control_mode value to opcua
@@ -358,7 +364,7 @@ class FlaskHandler:
                 print(f'local control_mode set to {self.local_ur10e.control_mode}')
 
                 # send control_mode update to OPCUA Server
-                await self.opcua_handler.to_opcua_sock.send_multipart([b"switchControl", serialized_message])
+                await self.zmq.to_opcua.send_multipart([b"switchControl", serialized_message])
                 print(f'control_mode {self.local_ur10e.control_mode} sent to opcua server')
 
             elif topic == b'video':
@@ -387,22 +393,21 @@ class FlaskHandler:
             # print(f'flask period: {self.flask_period}')
             await asyncio.sleep(self.calculate_flask_frequency_period)
 
+    async def start_tasks(self):
+        # create separate task for each class method
+        tasks = [
+            asyncio.create_task(self.polling_mechanism()),
+            asyncio.create_task(self.send()),
+            asyncio.create_task(self.receive()),
+            asyncio.create_task(self.calculate_flask_frequency())
+        ]
+        # run them concurrently
+        await asyncio.gather(*tasks)
 
 class OpcuaHandler:
-    def __init__(self, to_opcua, from_opcua, to_bridge, local_ur):
-        self.flask_handler = None
-        self.to_opcua_sock = to_opcua
-        self.to_bridge_sock = to_bridge
-
-        self.from_opcua_sock = from_opcua
-        self.from_opcua_sock.setsockopt(zmq.SUBSCRIBE, b"Move_Command")
-        self.from_opcua_sock.setsockopt(zmq.SUBSCRIBE, b"output_bit_command")
-        self.from_opcua_sock.setsockopt(zmq.SUBSCRIBE, b"switchControl")
-
+    def __init__(self, zmq_sockets, local_ur):
+        self.zmq = zmq_sockets
         self.local_ur10e = local_ur
-
-    def set_cross_dependency(self, flask_handler):
-        self.flask_handler = flask_handler
 
     async def send(self):
         # send to OPCUA from MW database
@@ -415,7 +420,7 @@ class OpcuaHandler:
                 serialized_message = json.dumps(self.local_ur10e.gather_to_send_current()).encode()
 
             try:
-                await self.to_opcua_sock.send_multipart([b"update_package", serialized_message])
+                await self.zmq.to_opcua.send_multipart([b"update_package", serialized_message])
             except Exception as e:
                 print(f'Can not send update to OPCUA: {e}')
             await asyncio.sleep(opcua_per)
@@ -425,7 +430,7 @@ class OpcuaHandler:
         serialized_message = None
         while True:
             try:
-                topic, serialized_message = await self.from_opcua_sock.recv_multipart()
+                topic, serialized_message = await self.zmq.from_opcua.recv_multipart()
             except Exception as e:
                 print(f'Could not receive message from OPCUA Server: {e}')
 
@@ -433,13 +438,13 @@ class OpcuaHandler:
                 # unpack and update local dataset
                 self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
                 # forward to bridge
-                await self.to_bridge_sock.send_multipart([topic, serialized_message])
+                await self.zmq.to_bridge.send_multipart([topic, serialized_message])
 
             elif topic == b"output_bit_command":
                 # unpack and update local dataset
                 self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
                 # forward to bridge
-                await self.to_bridge_sock.send_multipart([topic, serialized_message])
+                await self.zmq.to_bridge.send_multipart([topic, serialized_message])
 
             elif topic == b"switchControl":
                 # update local control_mode
@@ -447,8 +452,17 @@ class OpcuaHandler:
                 print(f'local control_mode set to {self.local_ur10e.control_mode}')
 
                 # send control_mode update to Flask Server
-                await self.flask_handler.to_flask_update.send_multipart([b"switchControl", serialized_message])
+                await self.zmq.flask_update.send_multipart([b"switchControl", serialized_message])
                 print(f'control {self.local_ur10e.control_mode} sent to flask server')
+
+    async def start_tasks(self):
+        # create separate task for each class method
+        tasks = [
+            asyncio.create_task(self.send()),
+            asyncio.create_task(self.receive()),
+        ]
+        # run them concurrently
+        await asyncio.gather(*tasks)
 
 
 async def receive_from_bridge(from_bridge_sock, local_ur10e):
@@ -458,43 +472,17 @@ async def receive_from_bridge(from_bridge_sock, local_ur10e):
         local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))  # blocking command
 
 
-context = zmq.asyncio.Context()
-
-
 async def main():
     local_ur10e = UR10e()
+    zmq_sockets = ZmqSockets()
 
-    (to_opcua_socket,
-     to_bridge_socket,
-     flask_polling,
-     to_flask_update,
-     from_bridge_socket,
-     from_opcua_socket) = initialize_zmq_connections(context)
+    flask_handler = FlaskHandler(zmq_sockets, local_ur10e)
+    opcua_handler = OpcuaHandler(zmq_sockets, local_ur10e)
 
-    cameras = Cameras()
-
-    flask_handler = FlaskHandler(flask_polling, to_flask_update, to_bridge_socket, local_ur10e, cameras)
-    opcua_handler = OpcuaHandler(to_opcua_socket, from_opcua_socket, to_bridge_socket, local_ur10e)
-
-    # set cross dependencies so flask and opcua handlers can use each other's methods
-    flask_handler.set_cross_dependency(opcua_handler)
-    opcua_handler.set_cross_dependency(flask_handler)
-
-    video_thread_1 = threading.Thread(target=cameras.start_camera_1)
-    video_thread_2 = threading.Thread(target=cameras.start_camera_2)
-    video_thread_3 = threading.Thread(target=cameras.start_camera_3)
-    video_thread_1.start()
-    video_thread_2.start()
-    video_thread_3.start()
-
-
-    await asyncio.gather(flask_handler.polling_mechanism(),
-                         flask_handler.send(),
-                         flask_handler.receive(),
-                         flask_handler.calculate_flask_frequency(),
-                         opcua_handler.send(),
-                         opcua_handler.receive(),
-                         receive_from_bridge(from_bridge_socket, local_ur10e))
+    await asyncio.gather(flask_handler.start_tasks(),
+                         opcua_handler.start_tasks(),
+                         receive_from_bridge(zmq_sockets.from_bridge, local_ur10e),
+                         local_ur10e.update_time())
 
 
 if __name__ == "__main__":

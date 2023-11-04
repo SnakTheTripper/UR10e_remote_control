@@ -33,7 +33,7 @@ async def freq_calc():
 
     if delta_time > 0:  # Avoid division by zero
         frequency = 1 / delta_time
-        print(f"Update Frequency: {frequency:.2f} Hz")
+        # print(f"Update Frequency: {frequency:.2f} Hz")
 
     prev_time = current_time
 
@@ -91,7 +91,7 @@ class UR10e:
 
         # represents last used move_type
         self.move_type = 1  # 0 = linear 1 = joint
-        self.control_mode = config.DEFAULT_MODE  # 0 = flask  1 = opcua
+        self.control_mode = config.DEFAULT_CONTROL_MODE  # 0 = flask  1 = opcua
         self.joint_speed = 0.1
         self.joint_accel = 0.1
         self.linear_speed = 0.1
@@ -117,6 +117,8 @@ class UR10e:
 
         self.SEND_MOVEMENT = 0
         self.SEND_OUTPUT_BITS = 0
+
+        self.mw_time = ''
 
     def update_local_from_mw(self, message):
         for key, value in message.items():
@@ -332,7 +334,7 @@ class MiddlewareHandler:
             except Exception as e:
                 print(e)
             if topic == b"update_package":
-                # await freq_calc()
+                await freq_calc()
                 self.local_ur10e.update_local_from_mw(message)  # message needs to be a dictionary
                 self.opcua_value_handler.update_opcua_from_local()
                 # no need to sleep as .recv_multipart() is awaited and it will block this function

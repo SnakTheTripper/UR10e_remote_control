@@ -79,12 +79,12 @@ def rv2rpy(tcp_pose):
     rpy = rotation.as_euler('yxz', degrees=True)
 
     r, p, y = rpy
-    tcp_pose[3], tcp_pose[4], tcp_pose[5] = r, p, y
+    tcp_pose[3], tcp_pose[4], tcp_pose[5] = r, -p, y
 
     return tcp_pose
 
 def rpy2rv(tcp_pose):
-    r, p, y = tcp_pose[3], tcp_pose[4], tcp_pose[5]
+    r, p, y = tcp_pose[3], -tcp_pose[4], tcp_pose[5]
     rpy = np.array([r, p, y])
 
     rotation = R.from_euler('yxz', rpy, degrees=True)
