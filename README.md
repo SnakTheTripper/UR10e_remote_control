@@ -51,20 +51,30 @@ As long as this is active any package will be installed in this virtual environm
 ## Running the program
 
 ```diff
+(all .py modules can be run from one machines)
+
 @@ TODO: @@
+
 Setting up config.py:
-- ONLINE_MODE = chose based on where you want to host the Flask Server: on IP_FLASK_LOCAL or IP_FLASK_CLOUD
+- ONLINE_MODE = True if Flask_server.py is running on cloud machine, False if running on local network
 
-- set the appropriate ip addresses in the IP ADDRESSES section:
-  - IP_UR10e = robot's IP on local network. Can be substituted by URSim with UR10e controller software. In case of using         URSim, the UR10e controller software's IP needs to be used (can be found navigating the GUI)
-  -IP_BRIDGE = IP of machine running ur10e_bridge.py
-  -IP_MWARE = IP of machine running MWare.py
-  -IP_OPCUA = IP of machine running opcua_server.py
-  -IP_FLASK_LOCAL = IP of machine running Flask_server.py on local network. Accessing this IP in a browser will open the        home page of the Flask server (in case ONLINE_MODE = False)
-  -IP_FLASK_CLOUD = public IP of the cloud machine running Flask_server.py
+- set the appropriate ip addresses: 
+  - IP_UR10e = robot's IP on local network. Can be substituted by URSim running UR10e controller software.
+  - IP_BRIDGE = IP of machine running ur10e_bridge.py
+  - IP_MWARE = IP of machine running MWare.py
+  - IP_OPCUA = IP of machine running opcua_server.py
+  - IP_FLASK_LOCAL = IP of machine running Flask_server.py on local network (if ONLINE_MODE = False)
+  - IP_FLASK_CLOUD = public IP of the cloud machine running Flask_server.py (if ONLINE_MODE = True)
 
-- set up the appropriate ports for  and ZMQ communication
-- pl. kell egy lokalis gep amin fut az bridge...
-- kell egy cloud szerver amin ki kell nyitni XXX portot, ezt a portot be kell irni a lokalis config.py allomanyba
-- a cloud-on kell futatni a flask programot es az opcua szervert
+- set up the appropriate ports for Flask Server, OPCUA Server and ZMQ communication
+
+- set desired Update Frequencies
+
+- select default Control Mode (which module will be able to send move commands to the robot)
+
+- set robot Home Position and Joint Limits
+
+- set network camera's RTSP links (max 3)
+
+- optionally set a starter program to be loaded on Flask Server start
 ```
