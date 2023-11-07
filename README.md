@@ -28,29 +28,42 @@ As long as this is active any package will be installed in this virtual environm
 * *TCP_control.html*: the linear motion website of the robot using end effector space control
 * **videos**: contains the video feed containers for the different camera feeds
   
-**ur10e_programs**: *demo.py*: and *programs.py* contain predefined targets to test the **moveJ** and **moveL** instructions.
+**ur10e_programs**:
 
-*Flask_server.py*: website generation and user event handling stript.
+*programs.py*: contains predefined targets to test the **Run Program** functionality of the control pages with sequential *moveJ* and *moveL* instructions.
 
-*MWare.py*: async management of the opcua client, zmq handler, flask executioner and local ur_rtde.
+*Flask_server.py*: website generation and user event handling stript. Forwards user inputs from the webpage to the **MiddleWare** in the form of target positions, can also control IO (when Control Mode is set to Flask). The robot's current positions and IO states are updated with a configurable frequency (*FLASK_FREQ* in *config.py*).
+
+*MWare.py*: async managment of FlaskHandler & OpcuaHandler to realize communication between those servers and the UR10e_bridge.py. It also handles the control switching function between Flask and Opcua with the appropriate logic for keeping everything up to date.
 
 *config.py*: contains TCP/IP configuration values for the robot access, cammera link and cloud ports. It also contains data rate values for the rtde interface.
 
-*opcua_server.py*: serves the robot states to opcua-based monitoring system such as ...
+*opcua_server.py*: mirrors current robot state including IO. Also capable of sending target position to move the robot when the *control_mode* is set to *1* (OPCUA mode). Update frequency is configurable in *config.py* (*OPCUA_FREQ*). Can be used to simulate the robot in virtual space (eg. Visual Components) or to controll it with any module connected to the OPCUA interface.
 
-*project_utils.py*: usefull unit conversion functions.
+*project_utils.py*: unit conversion functions for other modules.
 
 *requiremments.txt*: contains the python library requirements for the whole project (both for the cloud-based server and for the local bridge).
 
-*ur10e_bridge.py*: robot-side data manager with zmq interface. Uses the *ur_rtde* library to get info from the robot and send commands to it.
+*ur10e_bridge.py*: represents the bridge between UR10e robot and MiddleWare. It uses RTDE Receive, RTDE Control, RTDE IO and Dashboard Client APIs to receive current data and to send move commands to the robot. It also contains a ZMQ interface that is used to transmit data between it and MiddleWare. MW is always kept up to date with *RTDE_FREQ* (*config.py*)
 
-*ur10e_object.py*: Desines the OPCUA objects to successfully decipher the data to and from the server. Contains reference and current values for the UR10e joint variables, end effector displacement and orientation, movement speed, movement acceleration and logic I/O.
+*ur10e_object.py*: used to populate the OPCUA Server with UR10e object and all the relevant nodes, while also creating a python object with variables for all OPCUA nodes. Contains reference and current values for the UR10e joint variables, end effector displacement and orientation, movement speed, movement acceleration and digital I/O etc.
 
 ## Running the program
 
 ```diff
 @@ TODO: @@
-- Ide le kell irni a program futtatasanak eljarasat... 
+Setting up config.py:
+- ONLINE_MODE = chose based on where you want to host the Flask Server: on IP_FLASK_LOCAL or IP_FLASK_CLOUD
+
+- set the appropriate ip addresses in the IP ADDRESSES section:
+  - IP_UR10e = robot's IP on local network. Can be substituted by URSim with UR10e controller software. In case of using         URSim, the UR10e controller software's IP needs to be used (can be found navigating the GUI)
+  -IP_BRIDGE = IP of machine running ur10e_bridge.py
+  -IP_MWARE = IP of machine running MWare.py
+  -IP_OPCUA = IP of machine running opcua_server.py
+  -IP_FLASK_LOCAL = IP of machine running Flask_server.py on local network. Accessing this IP in a browser will open the        home page of the Flask server (in case ONLINE_MODE = False)
+  -IP_FLASK_CLOUD = public IP of the cloud machine running Flask_server.py
+
+- set up the appropriate ports for  and ZMQ communication
 - pl. kell egy lokalis gep amin fut az bridge...
 - kell egy cloud szerver amin ki kell nyitni XXX portot, ezt a portot be kell irni a lokalis config.py allomanyba
 - a cloud-on kell futatni a flask programot es az opcua szervert
