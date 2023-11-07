@@ -4,7 +4,7 @@ remote control application for UR10e robot with ZMQ communication between Flask 
 
 ## Getting started
 For the python script we use a virtual environment that contains all the necesarry dependencies as described by the requirements file.  
-Tested on Linux Mint, Ubuntu 22.04 (?) and WSL.
+Tested on Linux Mint, Ubuntu 22.04 and WSL.
 
 To create and activate a virtual environment, you will need to run the following commands:  
 `$ python3 -m venv .env`
