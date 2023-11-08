@@ -38,14 +38,23 @@ class ZmqSockets:
         self.subscribe_to_topics()
 
     def initialize_zmq_connections(self):
-        try:  # com with UR10e_bridge
+        try:
+        # com with UR10e_bridge
             self.to_bridge.connect(f"tcp://{config.IP_BRIDGE}:{config.PORT_MW_B}")
             self.from_bridge.connect(f"tcp://{config.IP_BRIDGE}:{config.PORT_B_MW}")
-            print('\033[32mUR10e Bridge ports bound!\033[0m')
+            print('\033[32mUR10e Bridge ports connected!\033[0m')
         except Exception as e:
-            sys.exit(f"\033[91mCan't connect to UR10e Bridge! {e}\033[0m")
+            print(f"\033[91mCan't connect to UR10e Bridge! {e}\033[0m")
 
-        try:  # com with Flask Server
+        try:
+        # com with OPCUA Server
+            self.to_opcua.bind(f"tcp://{config.IP_MWARE}:{config.PORT_MW_OP}")
+            self.from_opcua.bind(f"tcp://{config.IP_MWARE}:{config.PORT_OP_MW}")
+            print('\033[32mOPCUA Server ports bound!\033[0m')
+        except Exception as e:
+            print(f"\033[91mCan't bind to OPCUA Server! {e}\033[0m")
+        try:
+        # com with Flask Server
             if config.ONLINE_MODE:
                 self.flask_polling.connect(f"tcp://{config.IP_FLASK_CLOUD}:{config.PORT_FLASK_POLL}")
                 self.flask_update.connect(f"tcp://{config.IP_FLASK_CLOUD}:{config.PORT_FLASK_UPDATE}")
@@ -55,20 +64,15 @@ class ZmqSockets:
                 self.flask_update.connect(f"tcp://{config.IP_FLASK_LOCAL}:{config.PORT_FLASK_UPDATE}")
                 print(f'\033[32mConnected to Flask on {config.IP_FLASK_LOCAL}!\033[0m')
         except Exception as e:
-            sys.exit(f"\033[91mCan't connect to Flask Server! {e}\033[0m")
+            print(f"\033[91mCan't connect to Flask Server! {e}\033[0m")
 
-        try:  # com with OPCUA Server
-            self.to_opcua.bind(f"tcp://{config.IP_MWARE}:{config.PORT_MW_OP}")
-            self.from_opcua.bind(f"tcp://{config.IP_MWARE}:{config.PORT_OP_MW}")
-            print('\033[32mOPCUA Server ports bound!\033[0m')
-        except Exception as e:
-            sys.exit(f"\033[91mCan't connect to OPCUA Server! {e}\033[0m")
-
-        print(
-            f'Publish on port: {config.PORT_FLASK_POLL} & {config.PORT_FLASK_UPDATE} & {config.PORT_MW_B} & {config.PORT_MW_OP}\n'
-            f'Listening on port: {config.PORT_FLASK_VIDEO_1} & {config.PORT_FLASK_VIDEO_2} & {config.PORT_FLASK_VIDEO_3} & {config.PORT_B_MW} & {config.PORT_OP_MW}')
+        # print(
+        #     f'Publish on port: {config.PORT_FLASK_POLL} & {config.PORT_FLASK_UPDATE} & {config.PORT_MW_B} & {config.PORT_MW_OP}\n'
+        #     f'Listening on port: {config.PORT_FLASK_VIDEO_1} & {config.PORT_FLASK_VIDEO_2} & {config.PORT_FLASK_VIDEO_3} & {config.PORT_B_MW} & {config.PORT_OP_MW}')
 
     def subscribe_to_topics(self):
+        self.from_bridge.setsockopt(zmq.SUBSCRIBE, b'Joint_States')
+
         self.from_opcua.setsockopt(zmq.SUBSCRIBE, b"Move_Command")
         self.from_opcua.setsockopt(zmq.SUBSCRIBE, b"output_bit_command")
         self.from_opcua.setsockopt(zmq.SUBSCRIBE, b"switchControl")
@@ -164,13 +168,13 @@ class UR10e:
     async def update_time(self):
         while True:
             now = datetime.now()
-            # self.mw_time = now.strftime("%H:%M:%S.%f")[:-3]
             self.mw_time = now.strftime("%H:%M:%S")
 
-            await asyncio.sleep(flask_per)
+            await asyncio.sleep(0.1)
 
 
 class FlaskHandler:
+
     class Cameras:
         def __init__(self):
             self.context = zmq.Context()
@@ -196,30 +200,6 @@ class FlaskHandler:
                 video_socket.connect(f"tcp://{config.IP_FLASK_LOCAL}:{getattr(config, port_attr)}")
 
             return video_socket
-
-        def start_camera_1(self):
-            while True:
-                # Create a VideoCapture object to connect to the camera
-                cap = cv2.VideoCapture(self.camera_url_1)
-
-                while self.should_stream_1:
-                    # Capture a frame from the camera
-                    ret, frame = cap.read()
-
-                    if not ret:
-                        print('did not receive frame from camera!')
-                        break
-
-                    # Compress the frame
-                    ret, buffer = cv2.imencode('.jpg', frame)
-                    # Convert to bytes
-                    frame_bytes = buffer.tobytes()
-
-                    # Send the frame bytes over ZMQ
-                    self.video_socket_1.send(frame_bytes)
-
-                cap.release()
-                time.sleep(1)
 
         def start_camera(self, camera_id):
 
@@ -261,11 +241,11 @@ class FlaskHandler:
         self.local_ur10e = local_ur
 
         # periods
-        self.standby_period = 1             # for frequency of 1 Hz
+        self.standby_period = 0.2           # for frequency of 5 Hz
         self.flask_period = flask_per       # by default coming from project_utils.py
 
         # period between checking if standby or rtde period should be used in sending current states to Flask
-        self.calculate_flask_frequency_period = 0.1
+        self.calculate_flask_frequency_period = 0.01
         self.polling_reply_detected = False
 
         # CAMERA STUFF
@@ -274,7 +254,7 @@ class FlaskHandler:
 
         # camera heartbeat tracking
         self.camera_heartbeats = {1: time.time(), 2: time.time(), 3: time.time()}  # Initialize with current time
-        self.heartbeat_timeout = 4.0  # 5 seconds timeout
+        self.heartbeat_timeout = 10  # 10 seconds timeout to stop streaming
 
         self.heartbeat_task = asyncio.create_task(self.check_camera_heartbeats())
 
@@ -287,6 +267,7 @@ class FlaskHandler:
         self.video_thread_3.start()
 
     async def polling_mechanism(self):
+    # Periodically "poke" Flask_server.py to see if it has anything to respond
         while True:
             self.polling_reply_detected = False
             try:
@@ -373,7 +354,6 @@ class FlaskHandler:
                 setattr(self.cameras, f"should_stream_{video_id}", should_stream)
                 # print(f'should_stream: {video_id}')
 
-    # check to see if the videos should be streamed or not
     async def check_camera_heartbeats(self):
         while True:
             current_time = time.time()
@@ -466,7 +446,6 @@ class OpcuaHandler:
 
 
 async def receive_from_bridge(from_bridge_sock, local_ur10e):
-    from_bridge_sock.setsockopt(zmq.SUBSCRIBE, b'Joint_States')
     while True:
         topic, serialized_message = await from_bridge_sock.recv_multipart()
         local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))  # blocking command
