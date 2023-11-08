@@ -2,6 +2,8 @@
 
 remote control application for UR10e robot with ZMQ communication between Flask server and robot controller using RTDE.
 
+Attention: Remote Control needs to be enabled on robot controller for this software package to work!
+
 ## Getting started
 For the python script we use a virtual environment that contains all the necesarry dependencies as described by the requirements file.  
 Tested on Linux Mint, Ubuntu 22.04 and WSL.
