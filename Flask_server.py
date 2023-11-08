@@ -1,22 +1,25 @@
+import eventlet
+
+eventlet.monkey_patch()
+
+from eventlet.green import zmq
+from eventlet import wsgi
+
 import json
-import cv2
 import sys
-import threading
 import time
 from queue import Queue
 import base64
 
-import numpy as np
-import zmq
 from flask import Flask, render_template, redirect
 from flask_socketio import SocketIO
 import config
 import project_utils as pu
-from waitress import serve
 import logging
 
-logging.basicConfig(level=logging.ERROR)
-
+# logging.basicConfig(level=logging.ERROR)
+log = logging.getLogger('eventlet.wsgi')
+log.setLevel(logging.ERROR)
 
 # Set then check Update frequency for Flask
 freq_dict = pu.get_frequencies()
@@ -26,7 +29,7 @@ flask_per = freq_dict['flask_per']
 def gather_config_data_for_JavaScript():
     actual_ip_flask = config.IP_FLASK_CLOUD if config.ONLINE_MODE else config.IP_FLASK_LOCAL
     return {'ip_address_flask': actual_ip_flask,
-            'port_flask': config.PORT_FLASK_WEB,
+            'port_flask': config.PORT_FLASK_SERVER,
             'joint_limits_lower': config.joint_limits_lower,
             'joint_limits_upper': config.joint_limits_upper,
             'tcp_limits_lower': config.tcp_limits_lower,
@@ -103,46 +106,47 @@ class UR10e:
 
 
 class MiddleWare:
+    class ZmqSockets:
+        def __init__(self):
+            self.context = zmq.Context()
+
+            self.polling_socket = self.context.socket(zmq.REP)
+            self.update_socket = self.context.socket(zmq.SUB)
+            self.video_socket_1 = self.context.socket(zmq.SUB)
+            self.video_socket_2 = self.context.socket(zmq.SUB)
+            self.video_socket_3 = self.context.socket(zmq.SUB)
+
+            self.socket_setup()
+
+        def socket_setup(self):
+            # Connect to MW
+            try:
+                self.polling_socket.bind(f"tcp://*:{config.PORT_FLASK_POLL}")
+                self.update_socket.bind(f"tcp://*:{config.PORT_FLASK_UPDATE}")
+                self.video_socket_1.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_1}")
+                self.video_socket_2.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_2}")
+                self.video_socket_3.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_3}")
+
+                self.update_socket.setsockopt(zmq.SUBSCRIBE, b'Joint_States')
+                self.update_socket.setsockopt(zmq.SUBSCRIBE, b'switchControl')
+                self.video_socket_1.setsockopt_string(zmq.SUBSCRIBE, '')
+                self.video_socket_2.setsockopt_string(zmq.SUBSCRIBE, '')
+                self.video_socket_3.setsockopt_string(zmq.SUBSCRIBE, '')
+
+                print(f'Bound ports {config.PORT_FLASK_POLL} & {config.PORT_FLASK_UPDATE} to listen to MW')
+            except Exception as e:
+                sys.exit(
+                    f"Error with ports {config.PORT_FLASK_POLL}, {config.PORT_FLASK_UPDATE} or {config.PORT_FLASK_VIDEO_1}: {e}")
+
     def __init__(self):
         self.websocket = socket
 
-        class ZmqSockets:
-            def __init__(self):
-                self.context = zmq.Context()
-
-                self.polling_socket = self.context.socket(zmq.REP)
-                self.update_socket = self.context.socket(zmq.SUB)
-                self.video_socket_1 = self.context.socket(zmq.SUB)
-                self.video_socket_2 = self.context.socket(zmq.SUB)
-                self.video_socket_3 = self.context.socket(zmq.SUB)
-
-        self.zmq = ZmqSockets()
+        self.zmq = self.ZmqSockets()
 
         self.topic = None
         self.received_message = None
 
         self.web = WebMethods(self.websocket)
-
-        self.connect_to_mw()
-
-    def connect_to_mw(self):
-        # Connect to MW
-        try:
-            self.zmq.polling_socket.bind(f"tcp://*:{config.PORT_FLASK_POLL}")
-            self.zmq.update_socket.bind(f"tcp://*:{config.PORT_FLASK_UPDATE}")
-            self.zmq.video_socket_1.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_1}")
-            self.zmq.video_socket_2.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_2}")
-            self.zmq.video_socket_3.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_3}")
-
-            self.zmq.update_socket.setsockopt(zmq.SUBSCRIBE, b'Joint_States')
-            self.zmq.update_socket.setsockopt(zmq.SUBSCRIBE, b'switchControl')
-            self.zmq.video_socket_1.setsockopt_string(zmq.SUBSCRIBE, '')
-            self.zmq.video_socket_2.setsockopt_string(zmq.SUBSCRIBE, '')
-            self.zmq.video_socket_3.setsockopt_string(zmq.SUBSCRIBE, '')
-
-            print(f'Bound ports {config.PORT_FLASK_POLL} & {config.PORT_FLASK_UPDATE} to listen to MW')
-        except Exception as e:
-            sys.exit(f"Error with ports {config.PORT_FLASK_POLL}, {config.PORT_FLASK_UPDATE} or {config.PORT_FLASK_VIDEO_1}: {e}")
 
     def receive_polling(self):
         while True:
@@ -315,7 +319,7 @@ class SocketIOEvents:
             elif action == "switchControl":
                 self.buttons.switchControl()
             elif action == "toggleIoPanel":
-                self.toggleIoPanel(command_data)
+                self.buttons.toggleIoPanel(command_data)
             elif action == "pauseVideo":
                 self.buttons.pause_video(command_data)
             elif action == "resumeVideo":
@@ -333,9 +337,6 @@ class SocketIOEvents:
         def handle_keep_alive(message):
             # print(message["data"])
             self.socket.emit('keep_alive', {'message': 'Server is alive too'})
-
-    def toggleIoPanel(self, data):
-        self.buttons.io_panel_state = data["io_panel_state"]
 
 
 class WebMethods:
@@ -397,7 +398,7 @@ class Buttons:
     def __init__(self, socketio):
         self.socket = socketio
         self.web = WebMethods(self.socket)
-        self.io_panel_state = 0
+        self.io_panel_state = 1
 
         self.global_stop_flag = False
 
@@ -417,7 +418,7 @@ class Buttons:
         local_ur10e.target_tool_output_bits = data["target_tool_output_bits"]
 
         # send newly updated targets to MW only if flask is the active controlle
-        if local_ur10e.control_mode == 0:   # flask
+        if local_ur10e.control_mode == 0:  # flask
             message = local_ur10e.gather_to_send_output_bits()
             serialized_message = json.dumps(message).encode()
             self.message_queue.put([b"output_bit_command", serialized_message])
@@ -453,7 +454,7 @@ class Buttons:
             print('Control Mode is set to Unknown! Check value of control_mode in Flask_server.py')
 
     def stopButton(self):
-        if local_ur10e.control_mode == 0:   # flask
+        if local_ur10e.control_mode == 0:  # flask
             local_ur10e.STOP = 1  # will be reset by reply from robot
             socket.emit('STOP_button')  # for alert on webpage
             self.send_movement()  # send STOP signal
@@ -563,6 +564,9 @@ class Buttons:
 
         self.socket.emit('update_control_mode', {'control_mode': local_ur10e.control_mode})
 
+    def toggleIoPanel(self, data):
+        self.io_panel_state = data["io_panel_state"]
+
     def pause_video(self, data):
         topic = b'video'
         should_play = 0
@@ -602,34 +606,22 @@ if __name__ == '__main__':
     app = flask_server.get_app()
     app.config['UPLOAD_FOLDER'] = 'static'  # The directory where your images are stored
 
-    socket = SocketIO(app, cors_allowed_origins=[f"{config.FLASK_DOMAIN}",
-                                                f"{config.FLASK_DOMAIN}:{config.PORT_FLASK_WEB}",
-                                                f"http://{config.IP_FLASK_LOCAL}",
-                                                f"http://{config.IP_FLASK_LOCAL}:{config.PORT_FLASK_WEB}"])
+    socket = SocketIO(app, async_mode='eventlet',
+                      cors_allowed_origins=[f"{config.FLASK_DOMAIN}",
+                                            f"{config.FLASK_DOMAIN}:{config.PORT_FLASK_SERVER}",
+                                            f"http://{config.IP_FLASK_LOCAL}",
+                                            f"http://{config.IP_FLASK_LOCAL}:{config.PORT_FLASK_SERVER}"])
+
     buttons = Buttons(socket)
     SocketIOEvents(socket, buttons)
 
-
-    def run_app():
-        serve(app, host="0.0.0.0", port=config.PORT_FLASK_WEB)
-
-        # this is only for gevent or development mode
-        # socket.run(app, host=config.IP_FLASK_LOCAL, port=config.PORT_FLASK, debug=False,
-        #            allow_unsafe_werkzeug=True)
-
-    flask_thread = threading.Thread(target=run_app)
-    flask_thread.start()
-
     mw_handler = MiddleWare()
-    receiver_thread = threading.Thread(target=mw_handler.receive_from_mw)
-    receiver_thread.start()
 
-    receive_video_thread_1 = threading.Thread(target=mw_handler.receive_video_feed_1)
-    receive_video_thread_2 = threading.Thread(target=mw_handler.receive_video_feed_2)
-    receive_video_thread_3 = threading.Thread(target=mw_handler.receive_video_feed_3)
-    receive_video_thread_1.start()
-    receive_video_thread_2.start()
-    receive_video_thread_3.start()
+    eventlet.spawn(mw_handler.receive_from_mw)
+    eventlet.spawn(mw_handler.receive_polling)
+    eventlet.spawn(mw_handler.receive_video_feed_1)
+    eventlet.spawn(mw_handler.receive_video_feed_2)
+    eventlet.spawn(mw_handler.receive_video_feed_3)
 
-    receive_polling_thread = threading.Thread(target=mw_handler.receive_polling())
-    receive_polling_thread.start()
+    # Start the Flask app with eventlet
+    wsgi.server(eventlet.listen(("0.0.0.0", config.PORT_FLASK_SERVER)), app)
