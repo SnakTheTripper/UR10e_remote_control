@@ -48,6 +48,11 @@ As long as this is active any package will be installed in this virtual environm
 
 ## Running the program
 
+IP adresses of host machines need to be set to static!
+How-to:
+* Windows: https://kb.netgear.com/27476/How-do-I-set-a-static-IP-address-in-Windows
+* Linux: https://www.freecodecamp.org/news/setting-a-static-ip-in-ubuntu-linux-ip-address-tutorial/
+
 ```diff
 # Configuration Instructions
 
