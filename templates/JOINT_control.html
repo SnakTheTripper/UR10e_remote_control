@@ -16,6 +16,11 @@
             border-radius: 10px;
             transition: all 0.3s ease 0s;
         }
+        button:disabled:hover {
+            background-color: #2c3e50;
+            box-shadow: 0px 0px 20px rgba(0, 0, 0, 0);
+            transform: translateY(0px);
+        }
         button:hover {
             background-color: #34495e;
             box-shadow: 0px 15px 20px rgba(0, 0, 0, 0.4);
@@ -288,7 +293,7 @@
         }
 
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
     <script>
         var program_list = []                      // kept updated
         const configData = {{ config_data | tojson | safe }};
@@ -316,6 +321,7 @@
         let target_tool_output_bits = []
 
         let io_panel_state = 0
+        let mw_time = '00:00:00'
 
         var socket = io.connect('http://' + configData.ip_address_flask + ':' + configData.port_flask)
 
@@ -411,6 +417,34 @@
             let slider = document.getElementById(id);
             slider.value = parseFloat(slider.value) - 1;  // adjust step size here
             updateValue(slider, 'target_joint_box_' + id.split('_')[2]);
+        }
+        function increaseSliderSpeed() {
+            console.log("IncreaseSliderSpeed called");
+
+            let slider = document.getElementById('joint_speed');
+            slider.value = parseFloat(slider.value) + 1;  // adjust step size here
+            updateValue(slider, 'joint_speed_box');
+        }
+        function decreaseSliderSpeed() {
+            console.log("DecreaseSliderSpeed called");
+
+            let slider = document.getElementById('joint_speed');
+            slider.value = parseFloat(slider.value) - 1;  // adjust step size here
+            updateValue(slider, 'joint_speed_box');
+        }
+        function increaseSliderAccel() {
+            console.log("IncreaseSliderAccel called");
+
+            let slider = document.getElementById('joint_accel');
+            slider.value = parseFloat(slider.value) + 1;  // adjust step size here
+            updateValue(slider, 'joint_accel_box');
+        }
+        function decreaseSliderAccel(id) {
+            console.log("DecreaseSliderAccel called");
+
+            let slider = document.getElementById('joint_accel');
+            slider.value = parseFloat(slider.value) - 1;  // adjust step size here
+            updateValue(slider, 'joint_accel_box');
         }
         function sendOutputBits() {
             for (let i = 0 ; i < 8 ; i++) {
@@ -549,9 +583,11 @@
         // Initializes target_position sliders with current_position values for aesthetics (target = current)
         socket.on('page_init_values', function (data) {
 
-            console.log('initializing page')
+            // initialize clock
+            const clock = document.getElementById('clock')
+            clock.innerText = data.mw_time
 
-            // itialize control mode switcher button
+            // initialize control mode switcher button
             control_mode = data.control_mode
             const switchControlButton = document.getElementById('switchControlButton')
 
@@ -696,6 +732,14 @@
                     updateCurrentPosition(i, current_joint_positions[i]);
                 }
             }
+
+            // update time
+            if (mw_time !== data.mw_time) {
+                console.log(mw_time + data.mw_time)
+                const clock = document.getElementById('clock')
+                clock.innerText = data.mw_time
+                mw_time = data.mw_time
+            }
         });
         socket.on('update_current_IO', function (data) {
             old_standard_input_bits = standard_input_bits
@@ -783,7 +827,7 @@
             </div>
             <button type="button" onclick="switchControl()" id="switchControlButton">Switch Control Mode</button>
             <div style="width: 200px; display: flex; justify-content: flex-end;">
-                <button type="button" onclick="goToHome()">Home Page</button>
+                <a href="/home"><button>Home Page</button></a>
             </div>
         </div>
         <br>
@@ -815,22 +859,23 @@
                 <th scope="row"><label> Speed:</label></th>
                 <td class="unit" style="font-size: 16px">deg/s</td>
                 <td class="joint-slider-wrapper">
-                    <button type="button" onclick="decreaseSlider('joint_speed')">-</button>
+                    <button type="button" onclick="decreaseSliderSpeed()">-</button>
                     <input type="range" class="target-slider" id="joint_speed" name="joint_speed" min="1" max="179" step="1" value="{{ request.form['joint_speed']|default('10') }}" oninput="updateValue(this, 'joint_speed_box')">
-                    <button type="button" onclick="increaseSlider('joint_speed')">+</button>
+                    <button type="button" onclick="increaseSliderSpeed()">+</button>
                 </td>
                 <td><span id="joint_speed_box">0.00</span></td>
             <tr class="joint-row">
                 <th scope="row"><label> Acceleration:</label></th>
                 <td class="unit" style="font-size: 16px">deg/s<sup>2</sup></td>
                 <td class="joint-slider-wrapper">
-                    <button type="button" onclick="decreaseSlider('joint_accel')">-</button>
+                    <button type="button" onclick="decreaseSliderAccel()">-</button>
                     <input type="range" class="target-slider" id="joint_accel" name="joint_accel" min="1" max="179" step="1" value="{{ request.form['joint_accel']|default('10') }}" oninput="updateValue(this, 'joint_accel_box')">
-                    <button type="button" onclick="increaseSlider('joint_accel')">+</button>
+                    <button type="button" onclick="increaseSliderAccel()">+</button>
                 <td><span id="joint_accel_box">0.00</span></td>
             </tr>
         </table>
-        <div style="display: flex; justify-content: flex-end">
+        <div style="display: flex; justify-content: space-between">
+            <button id="clock" type="button" disabled>00:00:00</button>
             <button type="button" onclick="toggleIOControl()">I/O Control</button>
         </div>
         <div id="ioControl" style="display: none">
