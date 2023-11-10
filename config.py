@@ -1,7 +1,13 @@
 from ur10e_programs import programs
 from enum import Enum
 
-ONLINE_MODE = True
+# --------------------- ONLINE ---------------------
+
+ONLINE_MODE = False
+FLASK_DOMAIN = 'http://www.uitrobot.com'
+
+FLASK_USERNAME = 'beibei'
+FLASK_PASSWORD = 'admin'
 
 # ------------------ IP Addresses ------------------
 
@@ -12,14 +18,16 @@ IP_MWARE = "192.168.1.225"
 IP_OPCUA = "192.168.1.225"
 
 IP_FLASK_LOCAL = "192.168.1.225"
-IP_FLASK_CLOUD = "20.100.204.66"
-
-PORT_UR_DASHBOARD = 29999   # port for UR dashboard client
-FLASK_DOMAIN = 'http://www.uitrobot.com'
-PORT_FLASK_WEB = 80       # port of Flask Server
-PORT_OPCUA = 5001           # port of OPCUA Server
+IP_FLASK_CLOUD = "51.120.242.4"
 
 # ------------------ Ports ---------------------------
+
+# Server Ports
+
+PORT_FLASK_SERVER = 80          # port of Flask Server
+PORT_OPCUA = 5001               # port of OPCUA Server
+
+# ZMQ Ports
 
 PORT_B_MW = 5553                # bridge to MW
 PORT_MW_B = 5554                # MW to bridge
@@ -37,7 +45,7 @@ PORT_FLASK_VIDEO_3 = 5557       # live camera feed 3 to Flask
 # ------------------ Frequencies ---------------------
 
 RTDE_FREQ = 500             # [1 - rtde_frequency]
-FLASK_FREQ = 50            # [1 - rtde_frequency]
+FLASK_FREQ = 50             # [1 - rtde_frequency]
 OPCUA_FREQ = 50             # [1 - rtde_frequency]
 
 # ------------------ Control Modes --------------------
@@ -46,11 +54,6 @@ class ControlModes(Enum):
     OPCUA = 1
 
 DEFAULT_CONTROL_MODE = ControlModes.FLASK.value
-
-# ------------------ Starter Program ------------------
-
-# have a predefined waypoint list on server start
-STARTER_PROGRAM = programs.tcp_test
 
 # ------------------ Robot Settings -------------------
 
@@ -67,3 +70,18 @@ tcp_limits_upper = [1000, 1000, 1480, 180, 180, 180]            # XYZ in mm and 
 camera_rtsp_link_1 = 'rtsp://192.168.1.228:554/stream1'
 camera_rtsp_link_2 = 'rtsp://192.168.1.229:554/stream1'
 camera_rtsp_link_3 = 'rtsp://192.168.1.231:554/stream1'
+
+# ------------------ Starter Program ------------------
+
+# have a predefined waypoint list on server start
+STARTER_PROGRAM = [[1, [-180, -60, -120, -90, 90, 0], 15, 15],
+                   [0, [-500, 174, 300, 180, 20, -90], 0.1, 0.1],
+                   [0, [-500, -400, 300, 180, 20, -90], 0.1, 0.1],
+                   [0, [-500, -400, 300, 180, 20, -180], 0.1, 0.1],
+                   [0, [-800, -400, 300, 180, 20, -180], 0.1, 0.1],
+                   [0, [-800, -400, 300, 180, 20, -270], 0.1, 0.1],
+                   [0, [-800, 174, 300, 180, 20, -270], 0.1, 0.1],
+                   [0, [-800, 174, 300, 180, 20, -360], 0.1, 0.1],
+                   [0, [-500, 174, 300, 180, 20, -360], 0.1, 0.1],
+                   [0, [-500, 200, 300, 180, 20, -360], 0.1, 0.1],
+                   [1, [-180, -60, -120, -90, 90, 0], 30, 30]]

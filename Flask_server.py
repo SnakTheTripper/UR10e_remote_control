@@ -242,8 +242,8 @@ class FlaskServer:
     def __init__(self):
         self.app = Flask(__name__)
         self.app.secret_key = 'MGTXdET0aoFuRnbAfUbRdmpG6K5X1SUF'  # Replace with a strong secret key
-        self.username = 'beibei'
-        self.password = 'admin'
+        self.username = config.FLASK_USERNAME
+        self.password = config.FLASK_PASSWORD
 
         # setup of Flask-login
         self.login_manager = LoginManager()
