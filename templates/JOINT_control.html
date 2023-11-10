@@ -323,6 +323,10 @@
         let io_panel_state = 0
         let mw_time = '00:00:00'
 
+        let is_moving
+        let prev_is_moving
+        let buttonClickTime
+
         var socket = io.connect('http://' + configData.ip_address_flask + ':' + configData.port_flask)
 
         function arraysEqual(a, b) {
@@ -477,6 +481,7 @@
             socket.emit('button_press', {action: 'toggleIoPanel', io_panel_state: io_panel_state})
         }
         function handleSend() {
+            buttonClickTime = new Date().getTime()
             const jp = [];
             for (let i = 0; i < 6; i++) {
                 jp.push(parseFloat(document.getElementById(`target_joint_${i}`).value));
@@ -507,6 +512,7 @@
             }
         }
         function sendHome() {
+            buttonClickTime = new Date().getTime()
             // send home with moveJ to "untangle" joints
             const js = parseFloat(document.getElementById('joint_speed').value);
             const ja = parseFloat(document.getElementById('joint_accel').value);
@@ -525,6 +531,7 @@
             }
         }
         function handleStop() {
+            buttonClickTime = new Date().getTime()
             socket.emit('button_press', {action: 'stop'})
         }
         function addToList() {
@@ -723,6 +730,8 @@
             });
         }
         socket.on('update_current_positions', function(data) {
+            is_moving = data.is_moving
+
             const prev_joint_positions = current_joint_positions
             current_joint_positions = data.current_joint;
             // console.log(current_joint_positions)
@@ -735,7 +744,7 @@
 
             // update time
             if (mw_time !== data.mw_time) {
-                console.log(mw_time + data.mw_time)
+                // console.log(mw_time + data.mw_time)
                 const clock = document.getElementById('clock')
                 clock.innerText = data.mw_time
                 mw_time = data.mw_time
@@ -814,9 +823,29 @@
         }
         socket.on('keep_alive', function(data) {
             const msg = data.message
-            console.log(msg)
+            // console.log(msg)
         });
         setInterval(keepAlive, 5000)
+
+        // delay calculation
+
+        function continuouslyMonitorIsMoving() {
+            // Check if `is_moving` has changed
+            if (prev_is_moving !== is_moving) {
+                delayCalculation();
+                prev_is_moving = is_moving; // Update prev_is_moving for the next check
+            }
+
+            // set a timeout to check again after a short delay
+            setTimeout(continuouslyMonitorIsMoving, 1); // Check every 100 ms, adjust as needed
+        }
+        continuouslyMonitorIsMoving()
+
+        function delayCalculation() {
+            const feedbackTime = new Date().getTime();
+            const diff = feedbackTime - buttonClickTime
+            console.log('Feedback delay (ms): ' + diff)
+        }
     </script>
 </head>
 <body class="center-container" style="background-color: #EAF4F9">
