@@ -2,16 +2,16 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Title</title>
+    <title>UR10e Control Panel Login</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         body {
             display: flex;
             flex-direction: column;
-            align-items: center;  /* Aligns items to the start (left) */
+            align-items: flex-start;  /* Aligns items to the start (left) */
+            margin-left: 15%;
             justify-content: center;
             height: 100vh;
-            margin: 0;
             background-size: cover;
             background-position: center;
             background-color: #EAF4F9;
@@ -56,17 +56,38 @@
         .main-container {
             font-family: 'Roboto Mono', monospace; /* Updated font */
             margin-left: 15%;
+            width: 100%;
             height: 150px;
             display: flex;
             flex-direction: column;
             justify-content: space-around;
         }
+        .title-row {
+            font-family: 'Roboto Mono', monospace;
+            text-align: center;
+            font-size: 80px;
+            color: #34495e;
+            margin-left: 10px;
+            margin-right: 10px;
+            white-space: nowrap;
+        }
+        .ur10e {
+            font-weight: bold;
+            max-width: fit-content;
+        }
 
+        .remote {
+            max-width: fit-content;
+            font-size: 28px;
+            margin-bottom: 40px;
+        }
     </style>
 </head>
 <body>
 <form action="/login" method="post">
     <div class="main-container">
+        <div class="title-row ur10e">UR10e</div> <!-- First row of the title -->
+        <div class="title-row remote">Remote Control</div> <!-- Second row of the title -->
         <input type="text" name="username" placeholder="Username" required>
         <input type="password" name="password" placeholder="Password" required>
         <button>Login</button>
