@@ -11,7 +11,8 @@ import time
 from queue import Queue
 import base64
 
-from flask import Flask, render_template, redirect
+from flask import Flask, render_template, request, redirect, url_for, flash, session
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
 from flask_socketio import SocketIO
 import config
 import project_utils as pu
@@ -19,7 +20,7 @@ import logging
 
 # logging.basicConfig(level=logging.ERROR)
 log = logging.getLogger('eventlet.wsgi')
-log.setLevel(logging.ERROR)
+log.setLevel(logging.WARNING)
 
 # Set then check Update frequency for Flask
 freq_dict = pu.get_frequencies()
@@ -232,24 +233,65 @@ class MiddleWare:
                 print("frame_bytes is None. Skipping...")
 
 
+class User(UserMixin):
+    def __init__(self, username):
+        self.id = username
+def user_loader(user_id):
+    return User(user_id)
 class FlaskServer:
     def __init__(self):
         self.app = Flask(__name__)
+        self.app.secret_key = 'MGTXdET0aoFuRnbAfUbRdmpG6K5X1SUF'  # Replace with a strong secret key
+        self.username = 'beibei'
+        self.password = 'admin'
+
+        # setup of Flask-login
+        self.login_manager = LoginManager()
+        self.login_manager.init_app(self.app)
+        self.login_manager.login_view = 'login'
+
+        self.login_manager.user_loader(user_loader)
         self.app_routes()
 
     def get_app(self):
         return self.app
 
     def app_routes(self):
+        @self.app.route('/login', methods=["GET", "POST"])
+        def login():
+            if request.method == 'POST':
+                username = request.form['username']
+                password = request.form['password']
+                # Replace these with your hardcoded credentials
+                if username == self.username and password == self.password:
+                    user = User(username)
+                    login_user(user)
+
+                    session.permanent = False
+
+                    return redirect(url_for('home'))
+                else:
+                    flash('Invalid username or password')
+            return render_template('login.html')
+
+        @self.app.route('/logout')
+        def logout():
+            logout_user()
+            session.clear()
+            return redirect(url_for('login'))
+
         @self.app.route('/', methods=["GET", "POST"])
+        @login_required
         def index():
             return redirect('/home')
 
         @self.app.route('/home', methods=["GET", "POST"])
+        @login_required
         def home():
             return render_template('home.html')
 
         @self.app.route('/joint_control', methods=["GET", "POST"])
+        @login_required
         def JOINT_control_page():
             print("Joint Control Page Opened!")
             local_ur10e.move_type = 1  # moveJ
@@ -257,6 +299,7 @@ class FlaskServer:
             return render_template('JOINT_control.html', config_data=config_data)
 
         @self.app.route('/tcp_control', methods=["GET", "POST"])
+        @login_required
         def TCP_control_page():
             print("TCP Control Page Opened!")
             local_ur10e.move_type = 0  # moveL
@@ -265,24 +308,28 @@ class FlaskServer:
             return render_template('TCP_control.html', config_data=config_data)
 
         @self.app.route('/video1')
+        @login_required
         def video_page_1():
             print("Surveillance Video Page Opened! - 1")
             config_data = gather_config_data_for_JavaScript()
             return render_template('videos/video1.html', config_data=config_data)
 
         @self.app.route('/video2')
+        @login_required
         def video_page_2():
             print("Surveillance Video Page Opened! - 2")
             config_data = gather_config_data_for_JavaScript()
             return render_template('videos/video2.html', config_data=config_data)
 
         @self.app.route('/video3')
+        @login_required
         def video_page_3():
             print("Surveillance Video Page Opened! - 3")
             config_data = gather_config_data_for_JavaScript()
             return render_template('videos/video3.html', config_data=config_data)
 
         @self.app.route('/video_all')
+        @login_required
         def video_page_all():
             print("Surveillance Video Page Opened! - ALL")
             config_data = gather_config_data_for_JavaScript()
