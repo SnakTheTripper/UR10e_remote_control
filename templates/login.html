@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;  /* Aligns items to the start (left) */
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-size: cover;
+            background-position: center;
+            background-color: #EAF4F9;
+            /*noinspection CssUnknownTarget*/
+            background-image: url("{{ url_for('static', filename='home_bg.png') }}");
+        }
+        input[type="text"], input[type="password"] {
+            font-family: 'Roboto Mono', monospace; /* Consistent font */
+            font-size: 18px; /* Slightly larger font for readability */
+            padding: 10px; /* Comfortable text entry space */
+            margin: 10px 0; /* Space above and below each input */
+            border: 2px solid #34495e; /* Lighter border color */
+            border-radius: 12px; /* Rounded corners like buttons */
+            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.05); /* Subtle shadow for depth */
+            transition: border-color 0.3s; /* Smooth transition for hover effect */
+            background-color: #ecf0f1; /* Soft white background */
+            color: #2c3e50; /* Dark blue-gray text */
+            opacity: 70%;
+        }
+
+        input[type="text"]:hover, input[type="password"]:hover {
+            border-color: #2c3e50; /* Darker border on hover for interactivity */
+        }
+
+        input[type="text"]:focus, input[type="password"]:focus {
+            outline: none; /* Removes default focus outline */
+            border-color: #1abc9c; /* Distinct border color for active input */
+            box-shadow: 0px 4px 8px rgba(38, 185, 154, 0.3); /* Matching shadow for active input */
+        }
+        button {
+            font-size: 20px;
+            padding: 15px;
+            margin: 10px;
+            border: 2px solid #1d2a38;
+            cursor: pointer;
+            background-color: #2c3e50; /* Dark Blue-Gray */
+            color: #ecf0f1; /* Soft White */
+            border-radius: 12px; /* Rounded Corners */
+            box-shadow: 0px 8px 15px rgba(0, 0, 0, 0.1); /* Soft Shadow */
+            transition: all 0.3s ease 0s; /* Smooth transition for hover effect */
+            }
+        .main-container {
+            font-family: 'Roboto Mono', monospace; /* Updated font */
+            margin-left: 15%;
+            height: 150px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-around;
+        }
+
+    </style>
+</head>
+<body>
+<form action="/login" method="post">
+    <div class="main-container">
+        <input type="text" name="username" placeholder="Username" required>
+        <input type="password" name="password" placeholder="Password" required>
+        <button>Login</button>
+    </div>
+</form>
+</body>
+</html>
