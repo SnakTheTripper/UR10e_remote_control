@@ -50,7 +50,7 @@ class RtdeHandler:
         self.rtde_r = None
         self.rtde_c = None
         self.rtde_io = None
-        self.ur_dashboard_client = dashboard_client.DashboardClient(config.IP_UR10e, config.PORT_UR_DASHBOARD)
+        self.ur_dashboard_client = dashboard_client.DashboardClient(config.IP_UR10e, 29999)
 
     def connect_rtde_r(self):
         print("Connecting RTDE Receive Interface...")
@@ -305,7 +305,10 @@ class AsyncHandler:
         if self.local_ur10e.STOP == 0:
             # stop current movement before starting new one
             if self.local_ur10e.is_moving:
-                rtde_handler.rtde_c.stopJ(math.pi / 2, asynchronous=False)
+                rtde_handler.rtde_c.stopJ(self.local_ur10e.joint_accel, asynchronous=True)
+
+                while self.local_ur10e.is_moving:
+                    await asyncio.sleep(0.01)
 
             if self.local_ur10e.move_type == 0:  # MoveL
                 target_tcp = pu.mm2m(pu.rpy2rv(self.local_ur10e.target_tcp))
@@ -325,11 +328,11 @@ class AsyncHandler:
             print(f'debug: is_stopped: {self.is_stopped}')
             if self.local_ur10e.move_type == 0:  # MoveL
                 self.rtde_handler.rtde_c.stopL(max(self.local_ur10e.linear_accel, math.pi),
-                                               asynchronous=False)
+                                               asynchronous=True)
                 # async=True sometimes drops control script. Difficult to reconnect.
             elif self.local_ur10e.move_type == 1:  # MoveJ
                 self.rtde_handler.rtde_c.stopJ(max(self.local_ur10e.joint_accel, math.pi),
-                                               asynchronous=False)
+                                               asynchronous=True)
                 # async=False added benefit: easy to know when robot came to a stop.
             else:
                 print("Invalid move type for Stop command!")
