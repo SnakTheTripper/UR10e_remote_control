@@ -6,6 +6,10 @@
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         body {
+            /* needed for perfect page fit */
+            height: 0;
+            margin: 0;
+            
             display: flex;
             flex-direction: column;
             align-items: flex-start;  /* Aligns items to the start (left) */
@@ -81,6 +85,16 @@
             font-size: 28px;
             margin-bottom: 40px;
         }
+        .signature {
+            position: fixed;  /* Fixed position */
+            right: 10px;  /* Distance from right */
+            bottom: 10px;  /* Distance from bottom */
+            font-family: 'Roboto Mono', monospace;  /* Font */
+            font-size: 14px;  /* Font size */
+            font-style: italic;  /* Italics for style */
+            color: #555;  /* Text color */
+        }
+
     </style>
 </head>
 <body>
@@ -91,6 +105,7 @@
         <input type="text" name="username" placeholder="Username" required>
         <input type="password" name="password" placeholder="Password" required>
         <button>Login</button>
+        <div class="signature">by K. Kristof @ UiT Narvik</div>
     </div>
 </form>
 </body>
