@@ -201,7 +201,7 @@ class FlaskHandler:
 
             return video_socket
 
-        def start_camera(self, camera_id):
+        def start(self, camera_id):
 
             # print(f'debug: Starting camera {camera_id}')
 
@@ -246,6 +246,7 @@ class FlaskHandler:
 
         # period between checking if standby or rtde period should be used in sending current states to Flask
         self.calculate_flask_frequency_period = 0.01
+
         self.polling_reply_detected = False
 
         # CAMERA STUFF
@@ -259,9 +260,9 @@ class FlaskHandler:
         self.heartbeat_task = asyncio.create_task(self.check_camera_heartbeats())
 
         # start cameras threads
-        self.video_thread_1 = threading.Thread(target=self.cameras.start_camera, args=(1,))
-        self.video_thread_2 = threading.Thread(target=self.cameras.start_camera, args=(2,))
-        self.video_thread_3 = threading.Thread(target=self.cameras.start_camera, args=(3,))
+        self.video_thread_1 = threading.Thread(target=self.cameras.start, args=(1,))
+        self.video_thread_2 = threading.Thread(target=self.cameras.start, args=(2,))
+        self.video_thread_3 = threading.Thread(target=self.cameras.start, args=(3,))
         self.video_thread_1.start()
         self.video_thread_2.start()
         self.video_thread_3.start()
@@ -309,7 +310,7 @@ class FlaskHandler:
             except Exception as e:
                 print(f'Can not send update to Flask: {e}')
 
-            await asyncio.sleep(self.flask_period)
+            await asyncio.sleep(flask_per)
 
     async def receive(self):
         topic = None
@@ -363,23 +364,24 @@ class FlaskHandler:
                     setattr(self.cameras, f"should_stream_{video_id}", 0)
             await asyncio.sleep(1)  # Check every second
 
-    async def calculate_flask_frequency(self):
-        while True:
-            if self.local_ur10e.is_moving or self.local_ur10e.STOP:
-                self.flask_period = flask_per
-            else:
-                self.flask_period = self.standby_period
+    # lower update rate for when robot is idle (not moving)
 
-            # print(f'flask period: {self.flask_period}')
-            await asyncio.sleep(self.calculate_flask_frequency_period)
+    # async def calculate_flask_frequency(self):
+    #     while True:
+    #         if self.local_ur10e.is_moving or self.local_ur10e.STOP:
+    #             self.flask_period = flask_per
+    #         else:
+    #             self.flask_period = self.standby_period
+    #
+    #         # print(f'flask period: {self.flask_period}')
+    #         await asyncio.sleep(self.calculate_flask_frequency_period)
 
     async def start_tasks(self):
         # create separate task for each class method
         tasks = [
             asyncio.create_task(self.polling_mechanism()),
             asyncio.create_task(self.send()),
-            asyncio.create_task(self.receive()),
-            asyncio.create_task(self.calculate_flask_frequency())
+            asyncio.create_task(self.receive())
         ]
         # run them concurrently
         await asyncio.gather(*tasks)

@@ -8,6 +8,6 @@ PyQt5_sip==12.13.0
 pyzmq==25.1.1
 scipy==1.11.3
 ur-rtde==1.5.7
-waitress==2.1.2
-
+eventlet==0.33.3
+flask-Login==0.6.3
 opencv-python~=4.8.1.78

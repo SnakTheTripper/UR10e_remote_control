@@ -394,6 +394,7 @@ class WebMethods:
         self.socket.emit('update_current_positions',
                          {'current_joint': local_ur10e.current_joint,
                           'current_tcp': local_ur10e.current_tcp,
+                          "is_moving": local_ur10e.is_moving,
                           'mw_time': local_ur10e.mw_time})
 
     def update_target_positions(self):
