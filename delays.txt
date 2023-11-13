@@ -7,17 +7,20 @@ Server Location: OSLO, NO
 
 Feedback Time Analysis:
 -----------------------
-- Narvik, NO:
+- UiT Narvik, NO (wired):
   Average Response Time: 76 - 91 ms
 
-- Targu Mures, RO:
+- Skistua Narvik, NO (eduroam):
+  Average Response Time: 75 - 140 ms
+
+- Targu Mures, RO (wired):
   Average Response Time: 166 - 194 ms
 
-- Ontario, CA:
+- Ontario, CA (wireless):
   Average Response Time: 291 - 337 ms
 
-- North Carolina, USA:
-  Status: Awaiting Data
+- North Carolina, USA (wireless):
+  Average Response Time: 171 - 208 ms
 
 
 Local Flask Server (Max Update Frequency - 500 Hz):
@@ -37,4 +40,4 @@ and Web Client, and Cloud Flask and Middleware on the local network.
 Conclusion:
 -----------
 - The local server demonstrates significantly lower response times, highlighting the impact of
-network latency in cloud-based operations. Not much to improve on local side.
+network latency in cloud-based operations.
