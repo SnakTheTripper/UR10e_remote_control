@@ -4,7 +4,6 @@ eventlet.monkey_patch()
 
 from eventlet.green import zmq
 from eventlet import wsgi
-
 import json
 import sys
 import time
@@ -124,12 +123,14 @@ class MiddleWare:
             try:
                 self.polling_socket.bind(f"tcp://*:{config.PORT_FLASK_POLL}")
                 self.update_socket.bind(f"tcp://*:{config.PORT_FLASK_UPDATE}")
+
                 self.video_socket_1.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_1}")
                 self.video_socket_2.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_2}")
                 self.video_socket_3.bind(f"tcp://*:{config.PORT_FLASK_VIDEO_3}")
 
                 self.update_socket.setsockopt(zmq.SUBSCRIBE, b'Joint_States')
                 self.update_socket.setsockopt(zmq.SUBSCRIBE, b'switchControl')
+
                 self.video_socket_1.setsockopt_string(zmq.SUBSCRIBE, '')
                 self.video_socket_2.setsockopt_string(zmq.SUBSCRIBE, '')
                 self.video_socket_3.setsockopt_string(zmq.SUBSCRIBE, '')
@@ -569,14 +570,7 @@ class Buttons:
                     self.send_movement()
                     print(f"Doing move nr. {i + 1}")
 
-                    time.sleep(1)
-
-                    while local_ur10e.is_moving:
-                        if self.global_stop_flag:
-                            break
-                        time.sleep(flask_per)
-
-                    time.sleep(1)  # between waypoints
+                    self.wait_for_movement_to_complete()
 
                     if self.global_stop_flag:
                         break
@@ -594,6 +588,14 @@ class Buttons:
         else:
             socket.emit('no_program_to_run')
             print("No program to Run")
+
+    def wait_for_movement_to_complete(self):
+        time.sleep(1)  # initial delay for robot so start moving
+        while local_ur10e.is_moving:
+            if self.global_stop_flag:
+                return
+            time.sleep(flask_per)
+        time.sleep(1)  # delay between waypoints
 
     def switchControl(self):
         topic = b"switchControl"

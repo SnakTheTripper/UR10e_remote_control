@@ -1,5 +1,4 @@
 import asyncio
-import sys
 import json
 import threading
 import cv2
@@ -113,6 +112,8 @@ class UR10e:
         self.target_tool_output_bits = [0] * 2
 
         self.mw_time = ''
+
+        asyncio.gather(self.update_time())
 
     def update_local_dataset(self, data_dictionary):
         for key, value in data_dictionary.items():
@@ -325,20 +326,24 @@ class FlaskHandler:
                 print(e)
 
             if topic == b'Move_Command':
-                # unpack and update local dataset
-                self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
-                message = json.loads(serialized_message.decode())
-                print(f'debug: target tcp pose: {message}')
                 # forward to bridge
                 await self.zmq.to_bridge.send_multipart([topic, serialized_message])
                 print(f'debug: sent to bridge, STOP =  {self.local_ur10e.STOP}')
 
-            elif topic == b'output_bit_command':
-                print('debug: output_bit_command arrived!')
                 # unpack and update local dataset
                 self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
+                message = json.loads(serialized_message.decode())
+
+                print(f'debug: target tcp pose: {message}')
+
+            elif topic == b'output_bit_command':
+                print('debug: output_bit_command arrived!')
+
                 # forward to bridge
                 await self.zmq.to_bridge.send_multipart([topic, serialized_message])
+
+                # unpack and update local dataset
+                self.local_ur10e.update_local_dataset(json.loads(serialized_message.decode()))
 
             elif topic == b"switchControl":
                 # set local control_mode value to opcua
@@ -462,8 +467,7 @@ async def main():
 
     await asyncio.gather(flask_handler.start_tasks(),
                          opcua_handler.start_tasks(),
-                         receive_from_bridge(zmq_sockets.from_bridge, local_ur10e),
-                         local_ur10e.update_time())
+                         receive_from_bridge(zmq_sockets.from_bridge, local_ur10e))
 
 
 if __name__ == "__main__":

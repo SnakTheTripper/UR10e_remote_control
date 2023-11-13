@@ -1,4 +1,3 @@
-from ur10e_programs import programs
 from enum import Enum
 
 # --------------------- ONLINE ---------------------

@@ -297,45 +297,46 @@ class AsyncHandler:
             await asyncio.sleep(check_interval)  # outer loop interval
 
     async def moveX(self):
-        print(f'debug:\n'
-              f'Target Joint: {self.local_ur10e.target_joint}\n'
-              f'Target TCP:   {self.local_ur10e.target_tcp}\n'
-              f'is_stopped: {self.is_stopped}')
-
         if self.local_ur10e.STOP == 0:
             # stop current movement before starting new one
-            if self.local_ur10e.is_moving:
-                rtde_handler.rtde_c.stopJ(self.local_ur10e.joint_accel, asynchronous=True)
+            try:
+                if self.local_ur10e.is_moving:
+                    rtde_handler.rtde_c.stopJ(self.local_ur10e.joint_accel, asynchronous=False)
 
-                while self.local_ur10e.is_moving:
-                    await asyncio.sleep(0.01)
+                    while self.local_ur10e.is_moving:
+                        await asyncio.sleep(0.01)
 
-            if self.local_ur10e.move_type == 0:  # MoveL
-                target_tcp = pu.mm2m(pu.rpy2rv(self.local_ur10e.target_tcp))
-                self.rtde_handler.rtde_c.moveL(target_tcp, self.local_ur10e.linear_speed, self.local_ur10e.linear_accel,
-                                               asynchronous=True)  # True for non-blocking
+                if self.local_ur10e.move_type == 0:  # MoveL
+                    target_tcp = pu.mm2m(pu.rpy2rv(self.local_ur10e.target_tcp))
+                    self.rtde_handler.rtde_c.moveL(target_tcp, self.local_ur10e.linear_speed, self.local_ur10e.linear_accel,
+                                                   asynchronous=True)  # True for non-blocking
 
-            elif self.local_ur10e.move_type == 1:  # MoveJ
-                target_joint = pu.array_d2r(6, self.local_ur10e.target_joint)
-                self.rtde_handler.rtde_c.moveJ(target_joint, pu.d2r(self.local_ur10e.joint_speed),
-                                               pu.d2r(self.local_ur10e.joint_accel),
-                                               asynchronous=True)  # True for async (non-blocking)
-            else:
-                print("Invalid move type!")
+                elif self.local_ur10e.move_type == 1:  # MoveJ
+                    target_joint = pu.array_d2r(6, self.local_ur10e.target_joint)
+                    self.rtde_handler.rtde_c.moveJ(target_joint, pu.d2r(self.local_ur10e.joint_speed),
+                                                   pu.d2r(self.local_ur10e.joint_accel),
+                                                   asynchronous=True)  # True for async (non-blocking)
+                else:
+                    print("Invalid move type!")
+            except Exception as e:
+                print(f"Exception while handling Move command: {e}")
 
         elif self.local_ur10e.STOP == 1:
             self.is_stopped = True
             print(f'debug: is_stopped: {self.is_stopped}')
-            if self.local_ur10e.move_type == 0:  # MoveL
-                self.rtde_handler.rtde_c.stopL(max(self.local_ur10e.linear_accel, math.pi),
-                                               asynchronous=True)
-                # async=True sometimes drops control script. Difficult to reconnect.
-            elif self.local_ur10e.move_type == 1:  # MoveJ
-                self.rtde_handler.rtde_c.stopJ(max(self.local_ur10e.joint_accel, math.pi),
-                                               asynchronous=True)
-                # async=False added benefit: easy to know when robot came to a stop.
-            else:
-                print("Invalid move type for Stop command!")
+            try:
+                if self.local_ur10e.move_type == 0:  # MoveL
+                    self.rtde_handler.rtde_c.stopL(max(self.local_ur10e.linear_accel, math.pi),
+                                                   asynchronous=False)
+                    # async=True sometimes drops control script. Difficult to reconnect.
+                elif self.local_ur10e.move_type == 1:  # MoveJ
+                    self.rtde_handler.rtde_c.stopJ(max(self.local_ur10e.joint_accel, math.pi),
+                                                   asynchronous=False)
+                    # async=False added benefit: easy to know when robot came to a stop.
+                else:
+                    print("Invalid move type for Stop command!")
+            except Exception as e:
+                print(f"Exception while handling Stop command: {e}")
 
             self.local_ur10e.reset_STOP_flag = 1  # resets stop bit after robot is stopped (gets sent to MW)
             while self.local_ur10e.STOP == 1:
