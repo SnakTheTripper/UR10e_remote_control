@@ -66,6 +66,7 @@ def ur10e_platform_variables(idx, objects):
     joint_accel.set_writable()
     tcp_speed.set_writable()
     tcp_accel.set_writable()
+    is_moving.set_writeable()
     STOP.set_writable()
 
     # I/O STATUS & CONTROL
