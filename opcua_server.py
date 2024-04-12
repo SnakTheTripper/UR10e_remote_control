@@ -224,8 +224,10 @@ class OpcuaValueHandler:
             self.opcua_dataset[control_start + 3].set_value(self.local_ur10e.joint_accel)
             self.opcua_dataset[control_start + 4].set_value(self.local_ur10e.linear_speed)
             self.opcua_dataset[control_start + 5].set_value(self.local_ur10e.linear_accel)
-            self.opcua_dataset[control_start + 6].set_value(self.local_ur10e.is_moving)
+            #self.opcua_dataset[control_start + 6].set_value(self.local_ur10e.is_moving)
 
+        self.opcua_dataset[30].set_value(self.local_ur10e.is_moving)
+        
         # Updating current joint and TCP positions
         browse_names_current_joint = ["Current Base", "Current Shoulder", "Current Elbow", "Current Wrist 1",
                                       "Current Wrist 2", "Current Wrist 3"]
